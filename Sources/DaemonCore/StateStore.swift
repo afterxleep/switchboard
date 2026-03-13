@@ -17,7 +17,20 @@ public final class StateStore {
         self.decoder = JSONDecoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        decoder.dateDecodingStrategy = .iso8601
+        // Tolerate both ISO8601 strings (current format) and legacy Unix epoch doubles
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            if let str = try? container.decode(String.self) {
+                let iso = ISO8601DateFormatter()
+                if let date = iso.date(from: str) { return date }
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Cannot parse date string: \(str)"
+                )
+            }
+            let epoch = try container.decode(Double.self)
+            return Date(timeIntervalSince1970: epoch)
+        }
     }
 
     public var stateFilePath: String {

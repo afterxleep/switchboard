@@ -28,16 +28,22 @@ public final class LinearPoller: LinearPolling {
         }
     }
 
-    public func poll(knownIds: Set<String>) async throws -> [DaemonEvent] {
+    public func poll(state: [String: StateEntry]) async throws -> [DaemonEvent] {
         let issues = try await fetchIssues()
         return issues.compactMap { issue in
             let stateName = Self.normalizeStateName(issue.state.name)
             let eventId = "linear:\(issue.identifier)"
-            if knownIds.contains(eventId), terminalStates.contains(stateName) {
+
+            // Skip events we've already dispatched or processed
+            if let entry = state[eventId], entry.status == .inFlight || entry.status == .done {
+                return nil
+            }
+
+            if state.keys.contains(eventId), terminalStates.contains(stateName) {
                 return .issueCancelled(id: issue.id, identifier: issue.identifier)
             }
 
-            if knownIds.contains(eventId) == false, activeStates.contains(stateName) {
+            if state.keys.contains(eventId) == false, activeStates.contains(stateName) {
                 return .newIssue(
                     id: issue.id,
                     identifier: issue.identifier,

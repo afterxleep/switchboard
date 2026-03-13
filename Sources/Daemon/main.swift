@@ -93,7 +93,9 @@ let loop = DaemonLoop(
     stateStore: stateStore,
     completionWatcher: completionWatcher,
     logger: { message in
-        logJSON(level: "error", message: message, metadata: [:])
+        // Use "error" level only for actual errors; routine dispatch messages use "info"
+        let level = message.lowercased().contains("error") || message.lowercased().contains("fail") ? "error" : "info"
+        logJSON(level: level, message: message, metadata: [:])
     }
 )
 

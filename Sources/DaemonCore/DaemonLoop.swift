@@ -65,12 +65,7 @@ public final class DaemonLoop {
 
     public func tick() async throws {
         let currentState = try stateStore.load()
-        let linearKnownIds = Set(
-            currentState.values.compactMap { entry in
-                entry.id.hasPrefix("linear:") ? entry.id : nil
-            }
-        )
-        let linearEvents = try await linearPoller.poll(knownIds: linearKnownIds)
+        let linearEvents = try await linearPoller.poll(state: currentState)
         let githubEvents = try await githubPoller.poll(state: currentState)
 
         let allEvents = linearEvents + githubEvents

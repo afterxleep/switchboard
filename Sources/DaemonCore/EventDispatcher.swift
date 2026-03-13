@@ -10,8 +10,8 @@ public final class EventDispatcher: EventDispatching {
     }
 
     public func dispatch(_ event: DaemonEvent) throws {
-        if stateStore.isInFlight(id: event.eventId) {
-            print("already in flight, skipping")
+        let current = try? stateStore.load()[event.eventId]
+        if current?.status == .inFlight || current?.status == .done {
             return
         }
 
