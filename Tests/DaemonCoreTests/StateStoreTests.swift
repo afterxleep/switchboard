@@ -129,7 +129,8 @@ final class StateStoreTests: XCTestCase {
     func test_cleanup_removesOnlyDoneEntriesOlderThan24Hours() throws {
         // Arrange
         let store = makeStore()
-        let now = Date()
+        // Truncate to second precision so ISO8601 roundtrip is lossless
+        let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
         let staleDone = StateEntry(
             id: "linear:stale",
             status: .done,

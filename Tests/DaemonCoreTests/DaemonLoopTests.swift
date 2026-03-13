@@ -92,7 +92,9 @@ final class DaemonLoopTests: XCTestCase {
         try await loop.tick()
 
         // Assert
-        XCTAssertEqual(linearPoller.receivedKnownIds, [Set(["linear:DB-191", "linear:stale"])])
+        XCTAssertEqual(linearPoller.receivedStates.count, 1)
+        XCTAssertTrue(linearPoller.receivedStates[0].keys.contains("linear:DB-191"))
+        XCTAssertTrue(linearPoller.receivedStates[0].keys.contains("linear:stale"))
         XCTAssertEqual(githubPoller.receivedStates.count, 1)
         XCTAssertEqual(
             dispatcher.receivedDispatchedEvents,

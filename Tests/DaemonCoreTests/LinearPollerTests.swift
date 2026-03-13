@@ -19,7 +19,6 @@ final class LinearPollerTests: XCTestCase {
     }
 
     func test_poll_whenUnknownActiveIssueExists_returnsNewIssueEvent() async throws {
-        // Arrange
         let poller = LinearPoller(apiKey: "linear-token", teamSlug: "DB", urlSession: session)
         MockURLProtocol.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
@@ -27,170 +26,145 @@ final class LinearPollerTests: XCTestCase {
             let body = try XCTUnwrap(request.httpBody)
             let bodyText = try XCTUnwrap(String(data: body, encoding: .utf8))
             XCTAssertTrue(bodyText.contains("\"teamSlug\":\"DB\""))
-
-            return Self.makeResponse(
-                body: """
-                {
-                  "data": {
-                    "issues": {
-                      "nodes": [
-                        {
-                          "id": "issue-1",
-                          "identifier": "DB-190",
-                          "title": "Fix daemon",
-                          "description": "Handle wakeups",
-                          "state": { "name": "Todo" }
-                        }
-                      ]
-                    }
-                  }
-                }
-                """
-            )
+            return Self.makeResponse(body: """
+            {
+              "data": { "issues": { "nodes": [{
+                "id": "issue-1", "identifier": "DB-190",
+                "title": "Fix daemon", "description": "Handle wakeups",
+                "state": { "name": "Todo" }
+              }] } }
+            }
+            """)
         }
 
-        // Act
-        let events = try await poller.poll(knownIds: [])
+        let events = try await poller.poll(state: [:])
 
-        // Assert
-        XCTAssertEqual(
-            events,
-            [
-                .newIssue(
-                    id: "issue-1",
-                    identifier: "DB-190",
-                    title: "Fix daemon",
-                    description: "Handle wakeups"
-                )
-            ]
-        )
+        XCTAssertEqual(events, [.newIssue(id: "issue-1", identifier: "DB-190",
+                                          title: "Fix daemon", description: "Handle wakeups")])
     }
 
     func test_poll_whenKnownIssueMovesToTerminalState_returnsIssueCancelledEvent() async throws {
-        // Arrange
         let poller = LinearPoller(apiKey: "linear-token", teamSlug: "DB", urlSession: session)
         MockURLProtocol.requestHandler = { _ in
-            Self.makeResponse(
-                body: """
-                {
-                  "data": {
-                    "issues": {
-                      "nodes": [
-                        {
-                          "id": "issue-1",
-                          "identifier": "DB-190",
-                          "title": "Fix daemon",
-                          "description": null,
-                          "state": { "name": "CANCELLED" }
-                        }
-                      ]
-                    }
-                  }
-                }
-                """
-            )
+            Self.makeResponse(body: """
+            {
+              "data": { "issues": { "nodes": [{
+                "id": "issue-1", "identifier": "DB-190",
+                "title": "Fix daemon", "description": null,
+                "state": { "name": "CANCELLED" }
+              }] } }
+            }
+            """)
         }
 
-        // Act
-        let events = try await poller.poll(knownIds: ["issue-1"])
+        // Issue is known (pending) and now terminal — should emit issueCancelled
+        let state = Self.makeState(id: "linear:DB-190", status: .pending)
+        let events = try await poller.poll(state: state)
 
-        // Assert
         XCTAssertEqual(events, [.issueCancelled(id: "issue-1", identifier: "DB-190")])
     }
 
     func test_poll_whenIssueAlreadyKnownInActiveState_skipsDuplicateNewIssueEvent() async throws {
-        // Arrange
         let poller = LinearPoller(apiKey: "linear-token", teamSlug: "DB", urlSession: session)
         MockURLProtocol.requestHandler = { _ in
-            Self.makeResponse(
-                body: """
-                {
-                  "data": {
-                    "issues": {
-                      "nodes": [
-                        {
-                          "id": "issue-1",
-                          "identifier": "DB-190",
-                          "title": "Fix daemon",
-                          "description": null,
-                          "state": { "name": "in progress" }
-                        }
-                      ]
-                    }
-                  }
-                }
-                """
-            )
+            Self.makeResponse(body: """
+            {
+              "data": { "issues": { "nodes": [{
+                "id": "issue-1", "identifier": "DB-190",
+                "title": "Fix daemon", "description": null,
+                "state": { "name": "in progress" }
+              }] } }
+            }
+            """)
         }
 
-        // Act
-        let events = try await poller.poll(knownIds: ["issue-1"])
+        // Issue is known (pending) — should NOT emit a second newIssue
+        let state = Self.makeState(id: "linear:DB-190", status: .pending)
+        let events = try await poller.poll(state: state)
 
-        // Assert
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    func test_poll_whenIssueIsAlreadyInFlight_skipsEvent() async throws {
+        let poller = LinearPoller(apiKey: "linear-token", teamSlug: "DB", urlSession: session)
+        MockURLProtocol.requestHandler = { _ in
+            Self.makeResponse(body: """
+            {
+              "data": { "issues": { "nodes": [{
+                "id": "issue-1", "identifier": "DB-190",
+                "title": "Fix daemon", "description": null,
+                "state": { "name": "Todo" }
+              }] } }
+            }
+            """)
+        }
+
+        let state = Self.makeState(id: "linear:DB-190", status: .inFlight)
+        let events = try await poller.poll(state: state)
+
+        XCTAssertTrue(events.isEmpty)
+    }
+
+    func test_poll_whenIssueIsDone_skipsEvent() async throws {
+        let poller = LinearPoller(apiKey: "linear-token", teamSlug: "DB", urlSession: session)
+        MockURLProtocol.requestHandler = { _ in
+            Self.makeResponse(body: """
+            {
+              "data": { "issues": { "nodes": [{
+                "id": "issue-1", "identifier": "DB-190",
+                "title": "Fix daemon", "description": null,
+                "state": { "name": "CANCELLED" }
+              }] } }
+            }
+            """)
+        }
+
+        let state = Self.makeState(id: "linear:DB-190", status: .done)
+        let events = try await poller.poll(state: state)
+
         XCTAssertTrue(events.isEmpty)
     }
 
     func test_poll_normalizesStateNamesWhenMatchingConfiguredStates() async throws {
-        // Arrange
         let poller = LinearPoller(
-            apiKey: "linear-token",
-            teamSlug: "DB",
-            activeStates: ["todo"],
-            terminalStates: ["canceled"],
+            apiKey: "linear-token", teamSlug: "DB",
+            activeStates: ["todo"], terminalStates: ["canceled"],
             urlSession: session
         )
         MockURLProtocol.requestHandler = { _ in
-            Self.makeResponse(
-                body: """
-                {
-                  "data": {
-                    "issues": {
-                      "nodes": [
-                        {
-                          "id": "issue-active",
-                          "identifier": "DB-191",
-                          "title": "Case normalization",
-                          "description": null,
-                          "state": { "name": "TODO" }
-                        },
-                        {
-                          "id": "issue-terminal",
-                          "identifier": "DB-192",
-                          "title": "Cancelled item",
-                          "description": null,
-                          "state": { "name": "CANCELED" }
-                        }
-                      ]
-                    }
-                  }
-                }
-                """
-            )
+            Self.makeResponse(body: """
+            {
+              "data": { "issues": { "nodes": [
+                { "id": "issue-active", "identifier": "DB-191", "title": "Case normalization",
+                  "description": null, "state": { "name": "TODO" } },
+                { "id": "issue-terminal", "identifier": "DB-192", "title": "Cancelled item",
+                  "description": null, "state": { "name": "CANCELED" } }
+              ] } }
+            }
+            """)
         }
 
-        // Act
-        let events = try await poller.poll(knownIds: ["issue-terminal"])
+        // DB-192 is known (pending) and now terminal
+        let state = Self.makeState(id: "linear:DB-192", status: .pending)
+        let events = try await poller.poll(state: state)
 
-        // Assert
-        XCTAssertEqual(
-            events,
-            [
-                .newIssue(
-                    id: "issue-active",
-                    identifier: "DB-191",
-                    title: "Case normalization",
-                    description: nil
-                ),
-                .issueCancelled(id: "issue-terminal", identifier: "DB-192"),
-            ]
-        )
+        XCTAssertEqual(events, [
+            .newIssue(id: "issue-active", identifier: "DB-191", title: "Case normalization", description: nil),
+            .issueCancelled(id: "issue-terminal", identifier: "DB-192"),
+        ])
+    }
+
+    // MARK: - Helpers
+
+    private static func makeState(id: String, status: ItemStatus) -> [String: StateEntry] {
+        [id: StateEntry(id: id, status: status, eventType: "new_issue",
+                        details: "test", startedAt: nil, updatedAt: Date())]
     }
 
     private static func makeResponse(body: String) -> (HTTPURLResponse, Data) {
         let response = HTTPURLResponse(
             url: URL(string: "https://api.linear.app/graphql")!,
-            statusCode: 200,
-            httpVersion: nil,
+            statusCode: 200, httpVersion: nil,
             headerFields: ["Content-Type": "application/json"]
         )!
         return (response, Data(body.utf8))

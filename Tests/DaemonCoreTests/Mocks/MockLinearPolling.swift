@@ -8,11 +8,11 @@ final class MockLinearPolling: LinearPolling {
 
     var stubbedEvents: [DaemonEvent] = []
     var stubbedErrorSequence: [Error?] = []
-    var receivedKnownIds: [Set<String>] = []
+    var receivedStates: [[String: StateEntry]] = []
     var pollCallCount = 0
 
-    func poll(knownIds: Set<String>) async throws -> [DaemonEvent] {
-        receivedKnownIds.append(knownIds)
+    func poll(state: [String: StateEntry]) async throws -> [DaemonEvent] {
+        receivedStates.append(state)
         pollCallCount += 1
 
         if stubbedErrorSequence.isEmpty == false {

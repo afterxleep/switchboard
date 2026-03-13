@@ -22,7 +22,7 @@ final class DaemonConfigTests: XCTestCase {
 
         // Assert
         XCTAssertEqual(config.linearApiKey, "linear-token")
-        XCTAssertEqual(config.linearTeamSlug, "daniel-bernal")
+        XCTAssertEqual(config.linearTeamSlug, "DB")
         XCTAssertEqual(config.githubToken, "github-token")
         XCTAssertEqual(config.githubRepo, "afterxleep/flowdeck")
         XCTAssertEqual(config.pollIntervalSeconds, 30)
