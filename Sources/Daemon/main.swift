@@ -60,7 +60,7 @@ private func logJSON(level: String, message: String, metadata: [String: Any]) {
         return
     }
 
-    print(text)
+    fputs(text + "\n", stderr)
 }
 
 private func installSignalHandlers(loop: DaemonLoop) {

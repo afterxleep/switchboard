@@ -73,7 +73,11 @@ public final class DaemonLoop {
         let linearEvents = try await linearPoller.poll(knownIds: linearKnownIds)
         let githubEvents = try await githubPoller.poll(state: currentState)
 
-        for event in linearEvents + githubEvents {
+        let allEvents = linearEvents + githubEvents
+        if allEvents.isEmpty == false {
+            logger("dispatching \(allEvents.count) event(s)")
+        }
+        for event in allEvents {
             try dispatcher.dispatch(event)
         }
 

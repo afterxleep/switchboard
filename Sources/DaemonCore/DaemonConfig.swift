@@ -40,7 +40,7 @@ public struct DaemonConfig {
 
         return DaemonConfig(
             linearApiKey: linearApiKey,
-            linearTeamSlug: environment["LINEAR_TEAM_SLUG"] ?? "daniel-bernal",
+            linearTeamSlug: environment["LINEAR_TEAM_SLUG"] ?? "DB",
             githubToken: githubToken,
             githubRepo: environment["GITHUB_REPO"] ?? "afterxleep/flowdeck",
             pollIntervalSeconds: TimeInterval(environment["POLL_INTERVAL_SECONDS"] ?? "") ?? 30,

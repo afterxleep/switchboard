@@ -12,24 +12,32 @@ public final class LinearPoller: LinearPolling {
         teamSlug: String,
         activeStates: [String] = ["todo", "in progress"],
         terminalStates: [String] = ["done", "cancelled", "canceled", "closed", "duplicate"],
-        urlSession: URLSession = .shared
+        urlSession: URLSession? = nil
     ) {
         self.apiKey = apiKey
         self.teamSlug = teamSlug
         self.activeStates = Set(activeStates.map(Self.normalizeStateName))
         self.terminalStates = Set(terminalStates.map(Self.normalizeStateName))
-        self.urlSession = urlSession
+        if let urlSession {
+            self.urlSession = urlSession
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 20
+            config.timeoutIntervalForResource = 30
+            self.urlSession = URLSession(configuration: config)
+        }
     }
 
     public func poll(knownIds: Set<String>) async throws -> [DaemonEvent] {
         let issues = try await fetchIssues()
         return issues.compactMap { issue in
             let stateName = Self.normalizeStateName(issue.state.name)
-            if knownIds.contains(issue.id), terminalStates.contains(stateName) {
+            let eventId = "linear:\(issue.identifier)"
+            if knownIds.contains(eventId), terminalStates.contains(stateName) {
                 return .issueCancelled(id: issue.id, identifier: issue.identifier)
             }
 
-            if knownIds.contains(issue.id) == false, activeStates.contains(stateName) {
+            if knownIds.contains(eventId) == false, activeStates.contains(stateName) {
                 return .newIssue(
                     id: issue.id,
                     identifier: issue.identifier,
@@ -49,8 +57,8 @@ public final class LinearPoller: LinearPolling {
         request.setValue(apiKey, forHTTPHeaderField: "Authorization")
 
         let query = """
-        query Issues($teamSlug: String!, $stateNames: [String!]) {
-          issues(filter: {team: {key: {eq: $teamSlug}}, state: {name: {in: $stateNames}}}) {
+        query Issues($teamSlug: String!) {
+          issues(filter: {team: {key: {eq: $teamSlug}}}) {
             nodes {
               id
               identifier
@@ -61,10 +69,7 @@ public final class LinearPoller: LinearPolling {
           }
         }
         """
-        let variables = [
-            "teamSlug": teamSlug,
-            "stateNames": Array(activeStates.union(terminalStates)).sorted(),
-        ] as [String: Any]
+        let variables = ["teamSlug": teamSlug]
         request.httpBody = try JSONSerialization.data(
             withJSONObject: [
                 "query": query,
@@ -72,7 +77,7 @@ public final class LinearPoller: LinearPolling {
             ]
         )
 
-        let (data, _) = try await performDataRequest(with: request)
+        let (data, _) = try await urlSession.data(for: request)
         let response = try JSONDecoder().decode(LinearIssuesResponse.self, from: data)
         return response.data.issues.nodes
     }
@@ -81,25 +86,8 @@ public final class LinearPoller: LinearPolling {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
-    private func performDataRequest(with request: URLRequest) async throws -> (Data, URLResponse) {
-        try await withCheckedThrowingContinuation { continuation in
-            let task = urlSession.dataTask(with: request) { data, response, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-
-                guard let data, let response else {
-                    continuation.resume(throwing: URLError(.badServerResponse))
-                    return
-                }
-
-                continuation.resume(returning: (data, response))
-            }
-            task.resume()
-        }
-    }
 }
+
 
 private struct LinearIssuesResponse: Decodable {
     let data: LinearIssuesData

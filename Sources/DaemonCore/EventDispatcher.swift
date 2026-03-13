@@ -4,7 +4,7 @@ public final class EventDispatcher: EventDispatching {
     private let stateStore: StateStore
     private let openClawCommand: String
 
-    public init(stateStore: StateStore, openClawCommand: String = "openclaw") {
+    public init(stateStore: StateStore, openClawCommand: String = "/opt/homebrew/bin/openclaw") {
         self.stateStore = stateStore
         self.openClawCommand = openClawCommand
     }
@@ -45,8 +45,19 @@ public final class EventDispatcher: EventDispatching {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: openClawCommand)
         process.arguments = ["system", "event", "--text", message, "--mode", "now"]
+        // Suppress openclaw's stdout/stderr so it doesn't pollute daemon logs
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in semaphore.signal() }
         try process.run()
-        process.waitUntilExit()
+
+        // Wait up to 10 seconds; kill if it hangs
+        if semaphore.wait(timeout: .now() + 10) == .timedOut {
+            process.terminate()
+            throw EventDispatcherError.commandTimedOut(command: openClawCommand)
+        }
 
         guard process.terminationStatus == 0 else {
             throw EventDispatcherError.commandFailed(
@@ -62,11 +73,14 @@ public final class EventDispatcher: EventDispatching {
 
 public enum EventDispatcherError: LocalizedError, Equatable {
     case commandFailed(command: String, status: Int32)
+    case commandTimedOut(command: String)
 
     public var errorDescription: String? {
         switch self {
         case let .commandFailed(command, status):
             return "Command failed: \(command) exited with status \(status)"
+        case let .commandTimedOut(command):
+            return "Command timed out: \(command)"
         }
     }
 }
