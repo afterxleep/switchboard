@@ -1,6 +1,6 @@
 import Foundation
 
-public final class GitHubPoller {
+public final class GitHubPoller: GitHubPolling {
     private let token: String
     private let repo: String
     private let urlSession: URLSession

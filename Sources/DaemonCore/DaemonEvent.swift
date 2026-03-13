@@ -25,6 +25,40 @@ public enum DaemonEvent: Equatable {
         }
     }
 
+    public var eventType: String {
+        switch self {
+        case .newIssue:
+            return "new_issue"
+        case .issueCancelled:
+            return "issue_cancelled"
+        case .ciFailure:
+            return "ci_failure"
+        case .reviewComment:
+            return "review_comment"
+        case .approved:
+            return "approved"
+        case .conflict:
+            return "conflict"
+        }
+    }
+
+    public var messageIdentifier: String {
+        switch self {
+        case let .newIssue(_, identifier, _, _):
+            return identifier
+        case let .issueCancelled(_, identifier):
+            return identifier
+        case let .ciFailure(pr, _, _):
+            return "PR #\(pr)"
+        case let .reviewComment(pr, _, _):
+            return "PR #\(pr)"
+        case let .approved(pr, _):
+            return "PR #\(pr)"
+        case let .conflict(pr, _):
+            return "PR #\(pr)"
+        }
+    }
+
     public var details: String {
         switch self {
         case let .newIssue(_, identifier, title, description):

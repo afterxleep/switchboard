@@ -29,4 +29,27 @@ public struct StateEntry: Codable, Equatable {
         self.startedAt = startedAt
         self.updatedAt = updatedAt
     }
+
+    public func timedOut(after timeoutSeconds: TimeInterval) -> Bool {
+        guard let startedAt else {
+            return false
+        }
+
+        return Date().timeIntervalSince(startedAt) > timeoutSeconds
+    }
+
+    public var messageIdentifier: String {
+        if id.hasPrefix("linear:") {
+            return String(id.dropFirst("linear:".count))
+        }
+
+        if id.hasPrefix("gh:pr:") {
+            let components = id.split(separator: ":")
+            if components.count >= 3 {
+                return "PR #\(components[2])"
+            }
+        }
+
+        return id
+    }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-public final class LinearPoller {
+public final class LinearPoller: LinearPolling {
     private let apiKey: String
     private let teamSlug: String
     private let activeStates: Set<String>

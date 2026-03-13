@@ -18,6 +18,10 @@ public final class StateStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     }
 
+    public var stateFilePath: String {
+        stateFileURL.path
+    }
+
     public func load() throws -> [String: StateEntry] {
         guard fileManager.fileExists(atPath: stateFileURL.path) else {
             return [:]
@@ -32,6 +36,12 @@ public final class StateStore {
         try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         let data = try encoder.encode(state)
         try data.write(to: stateFileURL, options: .atomic)
+    }
+
+    public func upsert(_ entry: StateEntry) throws {
+        var state = try load()
+        state[entry.id] = entry
+        try save(state)
     }
 
     public func markInFlight(id: String) throws {
