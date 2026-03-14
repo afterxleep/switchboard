@@ -139,7 +139,8 @@ public final class GitHubPoller: GitHubPolling {
         }
 
         return response.checkRuns.allSatisfy { run in
-            run.status.lowercased() == "completed" && run.conclusion?.lowercased() == "success"
+            run.status.lowercased() == "completed" &&
+            (run.conclusion?.lowercased() == "success" || run.conclusion?.lowercased() == "skipped")
         }
     }
 

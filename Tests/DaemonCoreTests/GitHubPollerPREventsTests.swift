@@ -202,6 +202,60 @@ final class GitHubPollerPREventsTests: XCTestCase {
         }
     }
 
+    // MARK: - checksAllSucceeded treats skipped as passing
+
+    func test_ciIsPassing_whenAllChecksSuccessOrSkipped_returnsTrue() async throws {
+        // Arrange
+        MockURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            if path.contains("/pulls") && !path.contains("/comments") {
+                return Self.response(body: """
+                [{"number":10,"title":"T","state":"open","mergedAt":null,"head":{"ref":"kai/db-10","sha":"abc123"},"mergeableState":"clean"}]
+                """)
+            }
+            // check-runs: mix of success + skipped (real-world GitHub CI pattern)
+            return Self.response(body: """
+            {"check_runs":[
+              {"name":"Build","status":"completed","conclusion":"success"},
+              {"name":"Test","status":"completed","conclusion":"success"},
+              {"name":"Optional","status":"completed","conclusion":"skipped"}
+            ]}
+            """)
+        }
+        let poller = GitHubPoller(token: "github-token", repo: "afterxleep/flowdeck", urlSession: session)
+
+        // Act
+        let passing = try await poller.ciIsPassing(prNumber: 10)
+
+        // Assert
+        XCTAssertTrue(passing, "skipped checks must not block CI passing")
+    }
+
+    func test_ciIsPassing_whenAnyCheckFailed_returnsFalse() async throws {
+        // Arrange
+        MockURLProtocol.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            if path.contains("/pulls") && !path.contains("/comments") {
+                return Self.response(body: """
+                [{"number":11,"title":"T","state":"open","mergedAt":null,"head":{"ref":"kai/db-11","sha":"def456"},"mergeableState":"clean"}]
+                """)
+            }
+            return Self.response(body: """
+            {"check_runs":[
+              {"name":"Build","status":"completed","conclusion":"success"},
+              {"name":"Test","status":"completed","conclusion":"failure"}
+            ]}
+            """)
+        }
+        let poller = GitHubPoller(token: "github-token", repo: "afterxleep/flowdeck", urlSession: session)
+
+        // Act
+        let passing = try await poller.ciIsPassing(prNumber: 11)
+
+        // Assert
+        XCTAssertFalse(passing, "a failed check must block CI passing")
+    }
+
     private static func response(body: String, statusCode: Int = 200) -> (HTTPURLResponse, Data) {
         let response = HTTPURLResponse(
             url: URL(string: "https://api.github.com")!,
