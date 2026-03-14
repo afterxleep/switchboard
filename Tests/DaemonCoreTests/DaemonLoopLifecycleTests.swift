@@ -311,6 +311,108 @@ final class DaemonLoopLifecycleTests: XCTestCase {
         XCTAssertEqual(prMerger.receivedMergeRequests.count, 1)
     }
 
+    func test_daemonLoop_afterAgentTurnCompletes_resolvesPendingThreads() async throws {
+        let stateStore = makeStore()
+        try seedTrackedEntry(store: stateStore, phase: .waitingOnReview)
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedCIIsPassing = true
+        githubPoller.stubbedHasUnresolvedThreads = false
+        let agentRunner = MockAgentRunner()
+        agentRunner.stubbedResult = AgentResult(success: true, tokensUsed: 5, error: nil, threadId: "thread-2", threadPath: "/tmp/thread-2.jsonl")
+        let resolver = MockReviewThreadResolver()
+        let loop = makeLoop(
+            stateStore: stateStore,
+            githubPoller: githubPoller,
+            agentRunner: agentRunner,
+            linearManager: MockLinearStateManager(),
+            reviewThreadResolver: resolver
+        )
+
+        try await loop.routeForTesting(
+            .unresolvedThread(
+                pr: 145,
+                threadId: "9001",
+                nodeId: "PRT_kwDOThread1",
+                path: "Sources/File.swift",
+                body: "Please fix this",
+                author: "afterxleep"
+            )
+        )
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try await loop.tick()
+
+        XCTAssertEqual(resolver.receivedThreadNodeIds, ["PRT_kwDOThread1"])
+    }
+
+    func test_daemonLoop_whenResolutionFails_continuesAndLogsError() async throws {
+        let stateStore = makeStore()
+        try seedTrackedEntry(store: stateStore, phase: .waitingOnReview)
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedCIIsPassing = false
+        let agentRunner = MockAgentRunner()
+        agentRunner.stubbedResult = AgentResult(success: true, tokensUsed: 5, error: nil, threadId: "thread-2", threadPath: "/tmp/thread-2.jsonl")
+        let resolver = MockReviewThreadResolver()
+        resolver.stubbedErrorSequence = [MockReviewThreadResolver.MockError.forced]
+        let logs = LogSink()
+        let loop = makeLoop(
+            stateStore: stateStore,
+            githubPoller: githubPoller,
+            agentRunner: agentRunner,
+            linearManager: MockLinearStateManager(),
+            reviewThreadResolver: resolver,
+            logger: logs.log(message:)
+        )
+
+        try await loop.routeForTesting(
+            .unresolvedThread(
+                pr: 145,
+                threadId: "9001",
+                nodeId: "PRT_kwDOThread1",
+                path: "Sources/File.swift",
+                body: "Please fix this",
+                author: "afterxleep"
+            )
+        )
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try await loop.tick()
+
+        XCTAssertEqual(resolver.receivedThreadNodeIds, ["PRT_kwDOThread1"])
+        XCTAssertTrue(logs.messages.contains(where: { $0.contains("failed to resolve review thread PRT_kwDOThread1") }))
+    }
+
+    func test_daemonLoop_clearsNodeIdsAfterResolution() async throws {
+        let stateStore = makeStore()
+        try seedTrackedEntry(store: stateStore, phase: .waitingOnReview)
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedCIIsPassing = false
+        let agentRunner = MockAgentRunner()
+        agentRunner.stubbedResult = AgentResult(success: true, tokensUsed: 5, error: nil, threadId: "thread-2", threadPath: "/tmp/thread-2.jsonl")
+        let resolver = MockReviewThreadResolver()
+        let loop = makeLoop(
+            stateStore: stateStore,
+            githubPoller: githubPoller,
+            agentRunner: agentRunner,
+            linearManager: MockLinearStateManager(),
+            reviewThreadResolver: resolver
+        )
+
+        try await loop.routeForTesting(
+            .unresolvedThread(
+                pr: 145,
+                threadId: "9001",
+                nodeId: "PRT_kwDOThread1",
+                path: "Sources/File.swift",
+                body: "Please fix this",
+                author: "afterxleep"
+            )
+        )
+        try await Task.sleep(nanoseconds: 100_000_000)
+        try await loop.tick()
+
+        let entry = try XCTUnwrap(try stateStore.load()["linear:DB-200"])
+        XCTAssertTrue(entry.pendingThreadNodeIds.isEmpty)
+    }
+
     func test_mergeFailure_isLoggedAndNotFatal() async throws {
         let stateStore = makeStore()
         try seedTrackedEntry(store: stateStore)
@@ -489,6 +591,7 @@ final class DaemonLoopLifecycleTests: XCTestCase {
         linearManager: MockLinearStateManager,
         prReviewRequester: MockPRReviewRequester? = nil,
         prMerger: MockPRMerger? = nil,
+        reviewThreadResolver: MockReviewThreadResolver? = nil,
         workspaceManager: MockWorkspaceManager = MockWorkspaceManager(),
         maxAgentRetries: Int = 3,
         githubReviewer: String = "",
@@ -498,6 +601,7 @@ final class DaemonLoopLifecycleTests: XCTestCase {
             config: DaemonConfig(
                 linearApiKey: "linear-token",
                 linearTeamSlug: "DB",
+                linearAssigneeId: "",
                 githubToken: "github-token",
                 githubRepo: "afterxleep/flowdeck",
                 githubReviewer: githubReviewer,
@@ -518,6 +622,7 @@ final class DaemonLoopLifecycleTests: XCTestCase {
             linearStateManager: linearManager,
             prReviewRequester: prReviewRequester,
             prMerger: prMerger,
+            reviewThreadResolver: reviewThreadResolver,
             workspaceManager: workspaceManager,
             completionWatcher: completionWatcher,
             logger: logger,

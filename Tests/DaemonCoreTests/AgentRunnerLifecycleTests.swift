@@ -170,6 +170,7 @@ final class AgentRunnerLifecycleTests: XCTestCase {
         DaemonConfig(
             linearApiKey: "linear-token",
             linearTeamSlug: "DB",
+            linearAssigneeId: "",
             githubToken: "github-token",
             githubRepo: "afterxleep/flowdeck",
             pollIntervalSeconds: 30,

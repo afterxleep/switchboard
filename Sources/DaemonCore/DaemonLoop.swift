@@ -11,6 +11,7 @@ public final class DaemonLoop {
     private let linearStateManager: (any LinearStateManaging)?
     private let prReviewRequester: (any PRReviewRequesting)?
     private let prMerger: (any PRMerging)?
+    private let reviewThreadResolver: (any ReviewThreadResolving)?
     private let workspaceManager: any WorkspaceManaging
     private let branchParser: any BranchParsing
     private let logger: (String) -> Void
@@ -31,6 +32,7 @@ public final class DaemonLoop {
         linearStateManager: (any LinearStateManaging)? = nil,
         prReviewRequester: (any PRReviewRequesting)? = nil,
         prMerger: (any PRMerging)? = nil,
+        reviewThreadResolver: (any ReviewThreadResolving)? = nil,
         workspaceManager: any WorkspaceManaging = WorkspaceManager(),
         branchParser: any BranchParsing = IssueIdentifierBranchParser(),
         completionWatcher: any CompletionWatching = CompletionWatcher(),
@@ -52,6 +54,7 @@ public final class DaemonLoop {
         self.linearStateManager = linearStateManager
         self.prReviewRequester = prReviewRequester
         self.prMerger = prMerger
+        self.reviewThreadResolver = reviewThreadResolver
         self.workspaceManager = workspaceManager
         self.branchParser = branchParser
         self.logger = logger
@@ -240,7 +243,7 @@ public final class DaemonLoop {
             startAgentIfIdle(event: event, entry: entry)
 
         case let .reviewComment(pr, _, _),
-             let .unresolvedThread(pr, _, _, _, _):
+             let .unresolvedThread(pr, _, _, _, _, _):
             guard let entry = stateStore.entry(forPR: pr) else {
                 return
             }
@@ -291,7 +294,7 @@ public final class DaemonLoop {
 
         for event in events {
             switch event {
-            case let .reviewComment(pr, _, _), let .unresolvedThread(pr, _, _, _, _):
+            case let .reviewComment(pr, _, _), let .unresolvedThread(pr, _, _, _, _, _):
                 if firstFeedbackEventByPR[pr] == nil {
                     firstFeedbackEventByPR[pr] = event
                 }
@@ -312,6 +315,7 @@ public final class DaemonLoop {
         guard runningAgent(for: entry.id) == nil else {
             return
         }
+        persistPendingThreadNodeIds(for: event, entry: entry)
         startAgent(for: event, entryId: entry.id)
     }
 
@@ -353,16 +357,33 @@ public final class DaemonLoop {
                 try stateStore.resetRetry(id: completedId)
                 try stateStore.markPending(id: completedId)
 
-                if let entry = try? stateStore.load()[completedId], entry.agentPhase == .addressingFeedback, let prNumber = entry.prNumber {
-                    if try await githubPoller.ciIsPassing(prNumber: prNumber), try await githubPoller.hasUnresolvedThreads(prNumber: prNumber) == false {
-                        try stateStore.updatePhase(id: completedId, phase: .waitingOnReview)
-                        if let linearIssueId = entry.linearIssueId {
-                            try? await linearStateManager?.moveToInReview(issueId: linearIssueId)
-                        }
+                if var entry = try? stateStore.load()[completedId] {
+                    for nodeId in entry.pendingThreadNodeIds {
                         do {
-                            try await attemptMergeIfReady(prNumber: prNumber, stateId: completedId)
+                            try await reviewThreadResolver?.resolve(threadNodeId: nodeId)
                         } catch {
-                            logger("merge readiness check failed for PR #\(prNumber): \(error)")
+                            logger("failed to resolve review thread \(nodeId): \(error)")
+                        }
+                    }
+
+                    entry.pendingThreadNodeIds.removeAll()
+                    try stateStore.upsert(entry)
+
+                    if entry.agentPhase == .addressingFeedback, let prNumber = entry.prNumber {
+                        if
+                            try await githubPoller.ciIsPassing(prNumber: prNumber),
+                            try await githubPoller.hasUnresolvedThreads(prNumber: prNumber) == false,
+                            try await githubPoller.hasConflicts(prNumber: prNumber) == false
+                        {
+                            try stateStore.updatePhase(id: completedId, phase: .waitingOnReview)
+                            if let linearIssueId = entry.linearIssueId {
+                                try? await linearStateManager?.moveToInReview(issueId: linearIssueId)
+                            }
+                            do {
+                                try await attemptMergeIfReady(prNumber: prNumber, stateId: completedId)
+                            } catch {
+                                logger("merge readiness check failed for PR #\(prNumber): \(error)")
+                            }
                         }
                     }
                 }
@@ -392,6 +413,23 @@ public final class DaemonLoop {
             title: entry.details,
             description: error
         )
+    }
+
+    private func persistPendingThreadNodeIds(for event: DaemonEvent, entry: StateEntry) {
+        guard case let .unresolvedThread(_, _, nodeId, _, _, _) = event else {
+            return
+        }
+
+        var updatedEntry = entry
+        if updatedEntry.pendingThreadNodeIds.contains(nodeId) == false {
+            updatedEntry.pendingThreadNodeIds.append(nodeId)
+        }
+
+        do {
+            try stateStore.upsert(updatedEntry)
+        } catch {
+            logger("failed to persist pending thread node IDs for \(entry.id): \(error)")
+        }
     }
 
     private func entryForBranch(_ branch: String) -> StateEntry? {

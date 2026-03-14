@@ -80,6 +80,7 @@ public final class GitHubPoller: GitHubPolling {
                 events.append(.unresolvedThread(
                     pr: prNumber,
                     threadId: thread.id,
+                    nodeId: thread.nodeId,
                     path: thread.path ?? "unknown",
                     body: thread.body,
                     author: thread.author.login
@@ -149,6 +150,8 @@ public final class GitHubPoller: GitHubPolling {
     }
 
     private func fetchUnresolvedThreads(prNumber: Int) async throws -> [GitHubReviewThread] {
+        let reviewComments: [GitHubComment] = try await get(path: "/repos/\(repo)/pulls/\(prNumber)/comments")
+        let reviewCommentNodeIds = Dictionary(uniqueKeysWithValues: reviewComments.map { ($0.id, $0.nodeId) })
         let payload: GitHubGraphQLResponse<GitHubPullRequestThreadsData> = try await postGraphQL(query: """
         query PullRequestThreads($owner: String!, $repo: String!, $number: Int!) {
           repository(owner: $owner, name: $repo) {
@@ -160,6 +163,7 @@ public final class GitHubPoller: GitHubPolling {
                   path
                   comments(first: 20) {
                     nodes {
+                      databaseId
                       body
                       author {
                         login
@@ -175,10 +179,15 @@ public final class GitHubPoller: GitHubPolling {
 
         let threads = payload.data.repository.pullRequest.reviewThreads.nodes
         return threads.compactMap { thread in
-            guard thread.isResolved == false, let comment = thread.comments.nodes.last else {
+            guard
+                thread.isResolved == false,
+                let comment = thread.comments.nodes.last,
+                let commentId = comment.databaseId,
+                let nodeId = reviewCommentNodeIds[commentId]
+            else {
                 return nil
             }
-            return GitHubReviewThread(id: thread.id, path: thread.path, body: comment.body, author: comment.author)
+            return GitHubReviewThread(id: String(commentId), nodeId: nodeId, path: thread.path, body: comment.body, author: comment.author)
         }
     }
 
@@ -369,11 +378,15 @@ private struct GitHubReview: Decodable {
 }
 
 private struct GitHubComment: Decodable {
+    let id: Int
+    let nodeId: String
     let body: String
     let createdAt: Date
     let user: GitHubUser
 
     private enum CodingKeys: String, CodingKey {
+        case id
+        case nodeId = "node_id"
         case body
         case createdAt = "created_at"
         case user
@@ -416,12 +429,14 @@ private struct GitHubReviewThreadCommentConnection: Decodable {
 }
 
 private struct GitHubReviewThreadComment: Decodable {
+    let databaseId: Int?
     let body: String
     let author: GitHubUser
 }
 
 private struct GitHubReviewThread {
     let id: String
+    let nodeId: String
     let path: String?
     let body: String
     let author: GitHubUser

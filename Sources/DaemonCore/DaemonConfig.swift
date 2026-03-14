@@ -3,6 +3,7 @@ import Foundation
 public struct DaemonConfig {
     public let linearApiKey: String
     public let linearTeamSlug: String
+    public let linearAssigneeId: String
     public let githubToken: String
     public let githubRepo: String
     public let githubReviewer: String
@@ -25,6 +26,7 @@ public struct DaemonConfig {
     public init(
         linearApiKey: String,
         linearTeamSlug: String,
+        linearAssigneeId: String = "",
         githubToken: String,
         githubRepo: String,
         githubReviewer: String = "",
@@ -46,6 +48,7 @@ public struct DaemonConfig {
     ) {
         self.linearApiKey = linearApiKey
         self.linearTeamSlug = linearTeamSlug
+        self.linearAssigneeId = linearAssigneeId
         self.githubToken = githubToken
         self.githubRepo = githubRepo
         self.githubReviewer = githubReviewer
@@ -80,6 +83,7 @@ public struct DaemonConfig {
         return DaemonConfig(
             linearApiKey: linearApiKey,
             linearTeamSlug: environment["LINEAR_TEAM_SLUG"] ?? "DB",
+            linearAssigneeId: environment["LINEAR_ASSIGNEE_ID"] ?? "",
             githubToken: githubToken,
             githubRepo: environment["GITHUB_REPO"] ?? "afterxleep/flowdeck",
             githubReviewer: environment["GITHUB_REVIEWER"] ?? "",

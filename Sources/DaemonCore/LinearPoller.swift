@@ -3,6 +3,7 @@ import Foundation
 public final class LinearPoller: LinearPolling {
     private let apiKey: String
     private let teamSlug: String
+    private let assigneeId: String
     private let activeStates: Set<String>
     private let terminalStates: Set<String>
     private let urlSession: URLSession
@@ -10,12 +11,14 @@ public final class LinearPoller: LinearPolling {
     public init(
         apiKey: String,
         teamSlug: String,
+        assigneeId: String = "",
         activeStates: [String] = ["todo", "in progress"],
         terminalStates: [String] = ["done", "cancelled", "canceled", "closed", "duplicate"],
         urlSession: URLSession? = nil
     ) {
         self.apiKey = apiKey
         self.teamSlug = teamSlug
+        self.assigneeId = assigneeId
         self.activeStates = Set(activeStates.map(Self.normalizeStateName))
         self.terminalStates = Set(terminalStates.map(Self.normalizeStateName))
         if let urlSession {
@@ -62,20 +65,47 @@ public final class LinearPoller: LinearPolling {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "Authorization")
 
-        let query = """
-        query Issues($teamSlug: String!) {
-          issues(filter: {team: {key: {eq: $teamSlug}}}) {
-            nodes {
-              id
-              identifier
-              title
-              description
-              state { name }
+        let query: String
+        let variables: [String: String]
+
+        if assigneeId.isEmpty == false {
+            query = """
+            query Issues($teamSlug: String!, $assigneeId: String!) {
+              issues(filter: {
+                team: { key: { eq: $teamSlug } }
+                state: { type: { eq: "unstarted" } }
+                assignee: { id: { eq: $assigneeId } }
+              }) {
+                nodes {
+                  id
+                  identifier
+                  title
+                  description
+                  state { name }
+                }
+              }
             }
-          }
+            """
+            variables = [
+                "teamSlug": teamSlug,
+                "assigneeId": assigneeId,
+            ]
+        } else {
+            query = """
+            query Issues($teamSlug: String!) {
+              issues(filter: {team: {key: {eq: $teamSlug}}}) {
+                nodes {
+                  id
+                  identifier
+                  title
+                  description
+                  state { name }
+                }
+              }
+            }
+            """
+            variables = ["teamSlug": teamSlug]
         }
-        """
-        let variables = ["teamSlug": teamSlug]
         request.httpBody = try JSONSerialization.data(
             withJSONObject: [
                 "query": query,

@@ -24,6 +24,7 @@ public struct StateEntry: Codable, Equatable {
     public var lastTurnAt: Date?
     public var retryCount: Int
     public var consecutiveCIFailures: Int
+    public var pendingThreadNodeIds: [String]
 
     public init(
         id: String,
@@ -42,7 +43,8 @@ public struct StateEntry: Codable, Equatable {
         agentPhase: AgentPhase = .coding,
         lastTurnAt: Date? = nil,
         retryCount: Int = 0,
-        consecutiveCIFailures: Int = 0
+        consecutiveCIFailures: Int = 0,
+        pendingThreadNodeIds: [String] = []
     ) {
         self.id = id
         self.status = status
@@ -61,6 +63,50 @@ public struct StateEntry: Codable, Equatable {
         self.lastTurnAt = lastTurnAt
         self.retryCount = retryCount
         self.consecutiveCIFailures = consecutiveCIFailures
+        self.pendingThreadNodeIds = pendingThreadNodeIds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case eventType
+        case details
+        case startedAt
+        case updatedAt
+        case sessionId
+        case agentPid
+        case tokensUsed
+        case prNumber
+        case prTitle
+        case threadPath
+        case linearIssueId
+        case agentPhase
+        case lastTurnAt
+        case retryCount
+        case consecutiveCIFailures
+        case pendingThreadNodeIds
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        status = try container.decode(ItemStatus.self, forKey: .status)
+        eventType = try container.decode(String.self, forKey: .eventType)
+        details = try container.decode(String.self, forKey: .details)
+        startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
+        agentPid = try container.decodeIfPresent(Int.self, forKey: .agentPid)
+        tokensUsed = try container.decodeIfPresent(Int.self, forKey: .tokensUsed)
+        prNumber = try container.decodeIfPresent(Int.self, forKey: .prNumber)
+        prTitle = try container.decodeIfPresent(String.self, forKey: .prTitle)
+        threadPath = try container.decodeIfPresent(String.self, forKey: .threadPath)
+        linearIssueId = try container.decodeIfPresent(String.self, forKey: .linearIssueId)
+        agentPhase = try container.decodeIfPresent(AgentPhase.self, forKey: .agentPhase) ?? .coding
+        lastTurnAt = try container.decodeIfPresent(Date.self, forKey: .lastTurnAt)
+        retryCount = try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
+        consecutiveCIFailures = try container.decodeIfPresent(Int.self, forKey: .consecutiveCIFailures) ?? 0
+        pendingThreadNodeIds = try container.decodeIfPresent([String].self, forKey: .pendingThreadNodeIds) ?? []
     }
 
     public func timedOut(after timeoutSeconds: TimeInterval) -> Bool {

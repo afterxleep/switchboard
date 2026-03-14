@@ -5,6 +5,7 @@ final class DaemonConfigTests: XCTestCase {
     override func tearDown() {
         unsetenv("LINEAR_API_KEY")
         unsetenv("LINEAR_TEAM_SLUG")
+        unsetenv("LINEAR_ASSIGNEE_ID")
         unsetenv("GITHUB_TOKEN")
         unsetenv("GITHUB_REPO")
         unsetenv("GITHUB_REVIEWER")
@@ -28,6 +29,7 @@ final class DaemonConfigTests: XCTestCase {
         // Assert
         XCTAssertEqual(config.linearApiKey, "linear-token")
         XCTAssertEqual(config.linearTeamSlug, "DB")
+        XCTAssertEqual(config.linearAssigneeId, "")
         XCTAssertEqual(config.githubToken, "github-token")
         XCTAssertEqual(config.githubRepo, "afterxleep/flowdeck")
         XCTAssertEqual(config.githubReviewer, "")
@@ -47,6 +49,7 @@ final class DaemonConfigTests: XCTestCase {
         // Arrange
         setenv("LINEAR_API_KEY", "linear-token", 1)
         setenv("LINEAR_TEAM_SLUG", "platform", 1)
+        setenv("LINEAR_ASSIGNEE_ID", "agent-123", 1)
         setenv("GITHUB_TOKEN", "github-token", 1)
         setenv("GITHUB_REPO", "acme/daemon", 1)
         setenv("GITHUB_REVIEWER", "kai", 1)
@@ -62,6 +65,7 @@ final class DaemonConfigTests: XCTestCase {
 
         // Assert
         XCTAssertEqual(config.linearTeamSlug, "platform")
+        XCTAssertEqual(config.linearAssigneeId, "agent-123")
         XCTAssertEqual(config.githubRepo, "acme/daemon")
         XCTAssertEqual(config.githubReviewer, "kai")
         XCTAssertEqual(config.pollIntervalSeconds, 45)
@@ -79,5 +83,17 @@ final class DaemonConfigTests: XCTestCase {
 
         // Act / Assert
         XCTAssertThrowsError(try DaemonConfig.fromEnvironment())
+    }
+
+    func test_daemonConfig_linearAssigneeIdDefaultsToEmptyString() throws {
+        // Arrange
+        setenv("LINEAR_API_KEY", "linear-token", 1)
+        setenv("GITHUB_TOKEN", "github-token", 1)
+
+        // Act
+        let config = try DaemonConfig.fromEnvironment()
+
+        // Assert
+        XCTAssertEqual(config.linearAssigneeId, "")
     }
 }

@@ -143,9 +143,9 @@ final class GitHubPollerPREventsTests: XCTestCase {
             closedPRs: "[]",
             checkRuns: #"{"check_runs":[]}"#,
             reviews: "[]",
-            prComments: "[]",
+            prComments: #"[{"id":9001,"node_id":"PRRC_kwDOTest","body":"Please fix","created_at":"2026-03-14T12:00:00Z","user":{"login":"reviewer"}}]"#,
             issueComments: "[]",
-            threads: #"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","isResolved":false,"path":"Sources/File.swift","comments":{"nodes":[{"body":"Please fix","author":{"login":"reviewer"}}]}}]}}}}}"#
+            threads: #"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","isResolved":false,"path":"Sources/File.swift","comments":{"nodes":[{"databaseId":9001,"body":"Please fix","author":{"login":"reviewer"}}]}}]}}}}}"#
         )
 
         // Act

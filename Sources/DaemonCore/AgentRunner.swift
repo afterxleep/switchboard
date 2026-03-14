@@ -131,7 +131,7 @@ public final class AgentRunner: AgentRunning {
                     "{{COMMENT_PATH}}": "PR discussion",
                 ]
             )
-        case let .unresolvedThread(pr, _, path, body, author):
+        case let .unresolvedThread(pr, _, _, path, body, author):
             return applyCommonPlaceholders(
                 reviewTemplate,
                 context: context,
@@ -231,7 +231,7 @@ public final class AgentRunner: AgentRunning {
              let .prClosed(pr, _),
              let .prMerged(pr, _),
              let .ciPassed(pr, _),
-             let .unresolvedThread(pr, _, _, _, _):
+             let .unresolvedThread(pr, _, _, _, _, _):
             guard let matchedEntry = state.values.first(where: { $0.prNumber == pr }) else {
                 throw AgentRunnerError.missingStateEntry(event: event.eventId)
             }

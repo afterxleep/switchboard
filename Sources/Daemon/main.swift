@@ -30,6 +30,7 @@ private func makeConfig() -> DaemonConfig {
             config = DaemonConfig(
                 linearApiKey: config.linearApiKey,
                 linearTeamSlug: config.linearTeamSlug,
+                linearAssigneeId: config.linearAssigneeId,
                 githubToken: config.githubToken,
                 githubRepo: config.githubRepo,
                 githubReviewer: config.githubReviewer,
@@ -90,7 +91,8 @@ let config = makeConfig()
 let stateStore = StateStore(stateFilePath: config.stateFilePath)
 let linearPoller = LinearPoller(
     apiKey: config.linearApiKey,
-    teamSlug: config.linearTeamSlug
+    teamSlug: config.linearTeamSlug,
+    assigneeId: config.linearAssigneeId
 )
 let githubPoller = GitHubPoller(
     token: config.githubToken,
@@ -116,6 +118,16 @@ let prMerger = PRMerger(
     token: config.githubToken,
     repo: config.githubRepo
 )
+let reviewThreadResolver = ReviewThreadResolver(token: config.githubToken)
+
+if config.linearAssigneeId.isEmpty {
+    logJSON(
+        level: "warning",
+        message: "linear assignee filter disabled; LINEAR_ASSIGNEE_ID is empty",
+        metadata: [:]
+    )
+}
+
 let agentRunner: AgentRunner?
 if
     let workflowTemplate = try? String(contentsOfFile: workflowTemplatePath, encoding: .utf8),
@@ -154,6 +166,7 @@ let loop = DaemonLoop(
     linearStateManager: linearStateManager,
     prReviewRequester: prReviewRequester,
     prMerger: prMerger,
+    reviewThreadResolver: reviewThreadResolver,
     workspaceManager: WorkspaceManager(rootPath: config.workspaceRoot),
     completionWatcher: completionWatcher,
     logger: { message in

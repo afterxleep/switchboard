@@ -157,6 +157,58 @@ final class LinearPollerTests: XCTestCase {
         ])
     }
 
+    func test_linearPoller_whenAssigneeIdSet_filtersIssuesByAssignee() async throws {
+        let poller = LinearPoller(apiKey: "linear-token", teamSlug: "DB", assigneeId: "agent-123", urlSession: session)
+        MockURLProtocol.requestHandler = { request in
+            let body = try XCTUnwrap(request.httpBody)
+            let bodyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let query = try XCTUnwrap(bodyObject["query"] as? String)
+            let variables = try XCTUnwrap(bodyObject["variables"] as? [String: String])
+            XCTAssertTrue(query.contains("assignee: { id: { eq: $assigneeId } }"))
+            XCTAssertTrue(query.contains("state: { type: { eq: \"unstarted\" } }"))
+            XCTAssertEqual(variables["teamSlug"], "DB")
+            XCTAssertEqual(variables["assigneeId"], "agent-123")
+            return Self.makeResponse(body: """
+            {
+              "data": { "issues": { "nodes": [{
+                "id": "issue-1", "identifier": "DB-190",
+                "title": "Fix daemon", "description": null,
+                "state": { "name": "Todo" }
+              }] } }
+            }
+            """)
+        }
+
+        let events = try await poller.poll(state: [:])
+
+        XCTAssertEqual(events, [.newIssue(id: "issue-1", identifier: "DB-190", title: "Fix daemon", description: nil)])
+    }
+
+    func test_linearPoller_whenAssigneeIdEmpty_returnsAllIssues() async throws {
+        let poller = LinearPoller(apiKey: "linear-token", teamSlug: "DB", assigneeId: "", urlSession: session)
+        MockURLProtocol.requestHandler = { request in
+            let body = try XCTUnwrap(request.httpBody)
+            let bodyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let query = try XCTUnwrap(bodyObject["query"] as? String)
+            let variables = try XCTUnwrap(bodyObject["variables"] as? [String: String])
+            XCTAssertFalse(query.contains("assignee: { id: { eq: $assigneeId } }"))
+            XCTAssertEqual(variables, ["teamSlug": "DB"])
+            return Self.makeResponse(body: """
+            {
+              "data": { "issues": { "nodes": [{
+                "id": "issue-1", "identifier": "DB-190",
+                "title": "Fix daemon", "description": null,
+                "state": { "name": "Todo" }
+              }] } }
+            }
+            """)
+        }
+
+        let events = try await poller.poll(state: [:])
+
+        XCTAssertEqual(events, [.newIssue(id: "issue-1", identifier: "DB-190", title: "Fix daemon", description: nil)])
+    }
+
     // MARK: - Helpers
 
     private static func makeState(id: String, status: ItemStatus) -> [String: StateEntry] {

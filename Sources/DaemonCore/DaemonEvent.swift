@@ -9,7 +9,7 @@ public enum DaemonEvent: Equatable {
     case ciPassed(pr: Int, branch: String)
     case ciFailure(pr: Int, branch: String, failedChecks: [String])
     case reviewComment(pr: Int, body: String, author: String)
-    case unresolvedThread(pr: Int, threadId: String, path: String, body: String, author: String)
+    case unresolvedThread(pr: Int, threadId: String, nodeId: String, path: String, body: String, author: String)
     case approved(pr: Int, branch: String)
     case conflict(pr: Int, branch: String)
 
@@ -31,7 +31,7 @@ public enum DaemonEvent: Equatable {
             return "gh:pr:\(pr):ci_failure"
         case let .reviewComment(pr, _, _):
             return "gh:pr:\(pr):review_comment"
-        case let .unresolvedThread(pr, threadId, _, _, _):
+        case let .unresolvedThread(pr, threadId, _, _, _, _):
             return "gh:pr:\(pr):thread:\(threadId)"
         case let .approved(pr, _):
             return "gh:pr:\(pr):approved"
@@ -85,7 +85,7 @@ public enum DaemonEvent: Equatable {
             return "PR #\(pr)"
         case let .reviewComment(pr, _, _):
             return "PR #\(pr)"
-        case let .unresolvedThread(pr, _, _, _, _):
+        case let .unresolvedThread(pr, _, _, _, _, _):
             return "PR #\(pr)"
         case let .approved(pr, _):
             return "PR #\(pr)"
@@ -115,7 +115,7 @@ public enum DaemonEvent: Equatable {
             return "PR #\(pr) on \(branch) has failing checks: \(failedChecks.joined(separator: ", "))"
         case let .reviewComment(pr, body, author):
             return "\(author) commented on PR #\(pr): \(body)"
-        case let .unresolvedThread(pr, _, path, body, author):
+        case let .unresolvedThread(pr, _, _, path, body, author):
             return "\(author) left an unresolved thread on PR #\(pr) at \(path): \(body)"
         case let .approved(pr, branch):
             return "PR #\(pr) on \(branch) was approved"
