@@ -38,7 +38,15 @@ private func makeConfig() -> DaemonConfig {
                 codexCommand: config.codexCommand,
                 workspaceRoot: config.workspaceRoot,
                 repoPath: config.repoPath,
-                workflowTemplatePath: config.workflowTemplatePath
+                workflowTemplatePath: config.workflowTemplatePath,
+                workflowReviewTemplatePath: config.workflowReviewTemplatePath,
+                workflowCITemplatePath: config.workflowCITemplatePath,
+                workflowConflictTemplatePath: config.workflowConflictTemplatePath,
+                linearInProgressStateId: config.linearInProgressStateId,
+                linearInReviewStateId: config.linearInReviewStateId,
+                linearDoneStateId: config.linearDoneStateId,
+                maxAgentRetries: config.maxAgentRetries,
+                ciFailureThreshold: config.ciFailureThreshold
             )
         }
         return config
@@ -90,11 +98,28 @@ let githubPoller = GitHubPoller(
 let dispatcher = EventDispatcher(stateStore: stateStore)
 let completionWatcher = CompletionWatcher()
 let workflowTemplatePath = NSString(string: config.workflowTemplatePath).expandingTildeInPath
+let workflowReviewTemplatePath = NSString(string: config.workflowReviewTemplatePath).expandingTildeInPath
+let workflowCITemplatePath = NSString(string: config.workflowCITemplatePath).expandingTildeInPath
+let workflowConflictTemplatePath = NSString(string: config.workflowConflictTemplatePath).expandingTildeInPath
+let linearStateManager = LinearStateManager(
+    apiKey: config.linearApiKey,
+    inProgressStateId: config.linearInProgressStateId,
+    inReviewStateId: config.linearInReviewStateId,
+    doneStateId: config.linearDoneStateId
+)
 let agentRunner: AgentRunner?
-if let workflowTemplate = try? String(contentsOfFile: workflowTemplatePath, encoding: .utf8) {
+if
+    let workflowTemplate = try? String(contentsOfFile: workflowTemplatePath, encoding: .utf8),
+    let reviewTemplate = try? String(contentsOfFile: workflowReviewTemplatePath, encoding: .utf8),
+    let ciTemplate = try? String(contentsOfFile: workflowCITemplatePath, encoding: .utf8),
+    let conflictTemplate = try? String(contentsOfFile: workflowConflictTemplatePath, encoding: .utf8)
+{
     agentRunner = AgentRunner(
         repoPath: config.repoPath,
         workflowTemplate: workflowTemplate,
+        reviewTemplate: reviewTemplate,
+        ciTemplate: ciTemplate,
+        conflictTemplate: conflictTemplate,
         workspaceManager: WorkspaceManager(rootPath: config.workspaceRoot),
         codexClient: CodexAppServerClient(codexPath: config.codexCommand),
         stateStore: stateStore,
@@ -117,6 +142,8 @@ let loop = DaemonLoop(
     dispatcher: dispatcher,
     stateStore: stateStore,
     agentRunner: agentRunner,
+    linearStateManager: linearStateManager,
+    workspaceManager: WorkspaceManager(rootPath: config.workspaceRoot),
     completionWatcher: completionWatcher,
     logger: { message in
         // Use "error" level only for actual errors; routine dispatch messages use "info"

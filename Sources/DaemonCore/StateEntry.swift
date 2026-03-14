@@ -16,6 +16,13 @@ public struct StateEntry: Codable, Equatable {
     public var sessionId: String?
     public var agentPid: Int?
     public var tokensUsed: Int?
+    public var prNumber: Int?
+    public var threadPath: String?
+    public var linearIssueId: String?
+    public var agentPhase: AgentPhase
+    public var lastTurnAt: Date?
+    public var retryCount: Int
+    public var consecutiveCIFailures: Int
 
     public init(
         id: String,
@@ -26,7 +33,14 @@ public struct StateEntry: Codable, Equatable {
         updatedAt: Date,
         sessionId: String? = nil,
         agentPid: Int? = nil,
-        tokensUsed: Int? = nil
+        tokensUsed: Int? = nil,
+        prNumber: Int? = nil,
+        threadPath: String? = nil,
+        linearIssueId: String? = nil,
+        agentPhase: AgentPhase = .coding,
+        lastTurnAt: Date? = nil,
+        retryCount: Int = 0,
+        consecutiveCIFailures: Int = 0
     ) {
         self.id = id
         self.status = status
@@ -37,6 +51,13 @@ public struct StateEntry: Codable, Equatable {
         self.sessionId = sessionId
         self.agentPid = agentPid
         self.tokensUsed = tokensUsed
+        self.prNumber = prNumber
+        self.threadPath = threadPath
+        self.linearIssueId = linearIssueId
+        self.agentPhase = agentPhase
+        self.lastTurnAt = lastTurnAt
+        self.retryCount = retryCount
+        self.consecutiveCIFailures = consecutiveCIFailures
     }
 
     public func timedOut(after timeoutSeconds: TimeInterval) -> Bool {

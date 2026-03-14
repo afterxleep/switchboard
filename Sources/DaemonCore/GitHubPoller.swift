@@ -22,86 +22,114 @@ public final class GitHubPoller: GitHubPolling {
     }
 
     public func poll(state: [String: StateEntry]) async throws -> [DaemonEvent] {
-        let pullRequests = try await fetchPullRequests()
+        let openPullRequests = try await fetchPullRequests(state: "open")
+        let recentlyClosedPullRequests = try await fetchPullRequests(state: "closed")
 
-        // Poll all PRs concurrently — sequential was O(n × 4) API calls and timed out with large PR counts
-        let nestedEvents = try await withThrowingTaskGroup(of: [DaemonEvent].self) { group in
-            for pullRequest in pullRequests {
-                group.addTask {
-                    try await self.eventsForPR(pullRequest, state: state)
-                }
-            }
-
-            var all: [DaemonEvent] = []
-            for try await prEvents in group {
-                all.append(contentsOf: prEvents)
-            }
-            return all
-        }
-
-        return nestedEvents
-    }
-
-    private func eventsForPR(_ pullRequest: GitHubPullRequest, state: [String: StateEntry]) async throws -> [DaemonEvent] {
         var events: [DaemonEvent] = []
+        let trackedPRNumbers = Set(state.values.compactMap(\.prNumber))
 
-        let failedChecks = try await fetchFailedChecks(sha: pullRequest.head.sha)
-        if failedChecks.isEmpty == false {
-            let event = DaemonEvent.ciFailure(
-                pr: pullRequest.number,
-                branch: pullRequest.head.ref,
-                failedChecks: failedChecks
-            )
-            if shouldEmit(event: event, state: state) {
-                events.append(event)
+        for pullRequest in openPullRequests where shouldTrack(branch: pullRequest.head.ref) {
+            if trackedPRNumbers.contains(pullRequest.number) == false {
+                events.append(.prOpened(pr: pullRequest.number, branch: pullRequest.head.ref, title: pullRequest.title ?? ""))
             }
         }
 
-        let approved = try await hasApprovedReview(prNumber: pullRequest.number)
-        if approved {
-            let event = DaemonEvent.approved(pr: pullRequest.number, branch: pullRequest.head.ref)
-            if shouldEmit(event: event, state: state) {
-                events.append(event)
+        for entry in state.values {
+            guard let prNumber = entry.prNumber else {
+                continue
+            }
+
+            let pullRequest = openPullRequests.first(where: { $0.number == prNumber })
+                ?? recentlyClosedPullRequests.first(where: { $0.number == prNumber })
+
+            if let pullRequest, pullRequest.mergedAt != nil, entry.agentPhase != .done, entry.agentPhase != .merged {
+                events.append(.prMerged(pr: prNumber, branch: pullRequest.head.ref))
+            } else if let pullRequest, pullRequest.state.lowercased() == "closed", pullRequest.mergedAt == nil, entry.agentPhase != .done {
+                events.append(.prClosed(pr: prNumber, branch: pullRequest.head.ref))
+            }
+
+            guard let pullRequest else {
+                continue
+            }
+
+            if entry.agentPhase == .waitingOnCI, try await checksAllSucceeded(sha: pullRequest.head.sha) {
+                events.append(.ciPassed(pr: prNumber, branch: pullRequest.head.ref))
+            }
+
+            let failedChecks = try await fetchFailedChecks(sha: pullRequest.head.sha)
+            if failedChecks.isEmpty == false {
+                events.append(.ciFailure(pr: prNumber, branch: pullRequest.head.ref, failedChecks: failedChecks))
+            }
+
+            if try await hasApprovedReview(prNumber: prNumber) {
+                events.append(.approved(pr: prNumber, branch: pullRequest.head.ref))
+            }
+
+            if pullRequest.mergeableState?.lowercased() == "dirty" {
+                events.append(.conflict(pr: prNumber, branch: pullRequest.head.ref))
+            }
+
+            let lastPolled = lastPolledDate(for: pullRequest.number, state: state)
+            for comment in try await fetchReviewComments(prNumber: prNumber, lastPolledAt: lastPolled) {
+                events.append(.reviewComment(pr: prNumber, body: comment.body, author: comment.user.login))
+            }
+            for comment in try await fetchIssueComments(prNumber: prNumber, lastPolledAt: lastPolled) {
+                events.append(.reviewComment(pr: prNumber, body: comment.body, author: comment.user.login))
+            }
+            for thread in try await fetchUnresolvedThreads(prNumber: prNumber) {
+                events.append(.unresolvedThread(
+                    pr: prNumber,
+                    threadId: thread.id,
+                    path: thread.path ?? "unknown",
+                    body: thread.body,
+                    author: thread.author.login
+                ))
             }
         }
 
-        let lastPolled = lastPolledDate(for: pullRequest.number, state: state)
-        // Inline code review comments
-        let reviewComments = try await fetchReviewComments(prNumber: pullRequest.number, lastPolledAt: lastPolled)
-        // General PR issue comments (e.g. from `gh pr comment` or reviewer notes)
-        let issueComments = try await fetchIssueComments(prNumber: pullRequest.number, lastPolledAt: lastPolled)
-
-        for comment in reviewComments + issueComments {
-            let event = DaemonEvent.reviewComment(
-                pr: pullRequest.number,
-                body: comment.body,
-                author: comment.user.login
-            )
-            if shouldEmit(event: event, state: state) {
-                events.append(event)
-                break // one event per PR per tick to avoid spam
-            }
-        }
-
-        if pullRequest.mergeableState?.lowercased() == "dirty" {
-            let event = DaemonEvent.conflict(pr: pullRequest.number, branch: pullRequest.head.ref)
-            if shouldEmit(event: event, state: state) {
-                events.append(event)
-            }
-        }
-
-        return events
+        return deduplicate(events: events, state: state)
     }
 
-    private func fetchPullRequests() async throws -> [GitHubPullRequest] {
-        try await get(path: "/repos/\(repo)/pulls?state=open")
+    public func hasUnresolvedThreads(prNumber: Int) async throws -> Bool {
+        try await fetchUnresolvedThreads(prNumber: prNumber).isEmpty == false
+    }
+
+    public func hasConflicts(prNumber: Int) async throws -> Bool {
+        guard let pullRequest = try await fetchPullRequests(state: "open").first(where: { $0.number == prNumber }) else {
+            return false
+        }
+        return pullRequest.mergeableState?.lowercased() == "dirty"
+    }
+
+    public func ciIsPassing(prNumber: Int) async throws -> Bool {
+        guard let pullRequest = try await fetchPullRequests(state: "open").first(where: { $0.number == prNumber }) else {
+            return false
+        }
+        return try await checksAllSucceeded(sha: pullRequest.head.sha)
+    }
+
+    private func fetchPullRequests(state: String) async throws -> [GitHubPullRequest] {
+        try await get(path: "/repos/\(repo)/pulls?state=\(state)")
     }
 
     private func fetchFailedChecks(sha: String) async throws -> [String] {
         let response: GitHubCheckRunsResponse = try await get(path: "/repos/\(repo)/commits/\(sha)/check-runs")
         return response.checkRuns.compactMap { run in
-            guard let conclusion = run.conclusion else { return nil }
+            guard let conclusion = run.conclusion else {
+                return nil
+            }
             return conclusion.lowercased() == "failure" ? run.name : nil
+        }
+    }
+
+    private func checksAllSucceeded(sha: String) async throws -> Bool {
+        let response: GitHubCheckRunsResponse = try await get(path: "/repos/\(repo)/commits/\(sha)/check-runs")
+        guard response.checkRuns.isEmpty == false else {
+            return false
+        }
+
+        return response.checkRuns.allSatisfy { run in
+            run.status.lowercased() == "completed" && run.conclusion?.lowercased() == "success"
         }
     }
 
@@ -120,9 +148,75 @@ public final class GitHubPoller: GitHubPolling {
         return filter(comments: comments, after: lastPolledAt)
     }
 
+    private func fetchUnresolvedThreads(prNumber: Int) async throws -> [GitHubReviewThread] {
+        let payload: GitHubGraphQLResponse<GitHubPullRequestThreadsData> = try await postGraphQL(query: """
+        query PullRequestThreads($owner: String!, $repo: String!, $number: Int!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $number) {
+              reviewThreads(first: 100) {
+                nodes {
+                  id
+                  isResolved
+                  path
+                  comments(first: 20) {
+                    nodes {
+                      body
+                      author {
+                        login
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """, variables: graphQLVariables(prNumber: prNumber))
+
+        let threads = payload.data.repository.pullRequest.reviewThreads.nodes
+        return threads.compactMap { thread in
+            guard thread.isResolved == false, let comment = thread.comments.nodes.last else {
+                return nil
+            }
+            return GitHubReviewThread(id: thread.id, path: thread.path, body: comment.body, author: comment.author)
+        }
+    }
+
+    private func graphQLVariables(prNumber: Int) -> [String: Any] {
+        let components = repo.split(separator: "/", maxSplits: 1).map(String.init)
+        return [
+            "owner": components.first ?? "",
+            "repo": components.count > 1 ? components[1] : "",
+            "number": prNumber,
+        ]
+    }
+
     private func filter(comments: [GitHubComment], after date: Date?) -> [GitHubComment] {
-        guard let date else { return comments }
+        guard let date else {
+            return comments
+        }
         return comments.filter { $0.createdAt > date }
+    }
+
+    private func deduplicate(events: [DaemonEvent], state: [String: StateEntry]) -> [DaemonEvent] {
+        var seen = Set<String>()
+        var result: [DaemonEvent] = []
+
+        for event in events {
+            guard seen.insert(event.eventId).inserted else {
+                continue
+            }
+
+            if shouldEmit(event: event, state: state) {
+                result.append(event)
+            }
+        }
+
+        return result
+    }
+
+    private func shouldTrack(branch: String) -> Bool {
+        branch.hasPrefix("kai/") || branch.hasPrefix("feature/")
     }
 
     private func get<T: Decodable>(path: String) async throws -> T {
@@ -130,6 +224,20 @@ public final class GitHubPoller: GitHubPolling {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let (data, _) = try await urlSession.data(for: request)
+        return try decoder.decode(T.self, from: data)
+    }
+
+    private func postGraphQL<T: Decodable>(query: String, variables: [String: Any]) async throws -> T {
+        var request = URLRequest(url: URL(string: "https://api.github.com/graphql")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "query": query,
+            "variables": variables,
+        ])
         let (data, _) = try await urlSession.data(for: request)
         return try decoder.decode(T.self, from: data)
     }
@@ -149,12 +257,15 @@ public final class GitHubPoller: GitHubPolling {
 
 private struct GitHubPullRequest: Decodable {
     let number: Int
+    let title: String?
+    let state: String
+    let mergedAt: Date?
     let head: GitHubPullRequestHead
-    let mergeable: Bool?
     let mergeableState: String?
 
     private enum CodingKeys: String, CodingKey {
-        case number, head, mergeable
+        case number, title, state, head
+        case mergedAt = "merged_at"
         case mergeableState = "mergeable_state"
     }
 }
@@ -166,6 +277,7 @@ private struct GitHubPullRequestHead: Decodable {
 
 private struct GitHubCheckRunsResponse: Decodable {
     let checkRuns: [GitHubCheckRun]
+
     private enum CodingKeys: String, CodingKey {
         case checkRuns = "check_runs"
     }
@@ -173,6 +285,7 @@ private struct GitHubCheckRunsResponse: Decodable {
 
 private struct GitHubCheckRun: Decodable {
     let name: String
+    let status: String
     let conclusion: String?
 }
 
@@ -194,4 +307,47 @@ private struct GitHubComment: Decodable {
 
 private struct GitHubUser: Decodable {
     let login: String
+}
+
+private struct GitHubGraphQLResponse<T: Decodable>: Decodable {
+    let data: T
+}
+
+private struct GitHubPullRequestThreadsData: Decodable {
+    let repository: GitHubRepository
+}
+
+private struct GitHubRepository: Decodable {
+    let pullRequest: GitHubGraphQLPullRequest
+}
+
+private struct GitHubGraphQLPullRequest: Decodable {
+    let reviewThreads: GitHubReviewThreadConnection
+}
+
+private struct GitHubReviewThreadConnection: Decodable {
+    let nodes: [GitHubReviewThreadNode]
+}
+
+private struct GitHubReviewThreadNode: Decodable {
+    let id: String
+    let isResolved: Bool
+    let path: String?
+    let comments: GitHubReviewThreadCommentConnection
+}
+
+private struct GitHubReviewThreadCommentConnection: Decodable {
+    let nodes: [GitHubReviewThreadComment]
+}
+
+private struct GitHubReviewThreadComment: Decodable {
+    let body: String
+    let author: GitHubUser
+}
+
+private struct GitHubReviewThread {
+    let id: String
+    let path: String?
+    let body: String
+    let author: GitHubUser
 }

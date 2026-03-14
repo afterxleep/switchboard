@@ -5,6 +5,7 @@ public final class CodexAppServerClient: CodexAppServerRunning {
     private let transportFactory: () -> Transporting
 
     public private(set) var lastThreadId: String?
+    public private(set) var lastThreadPath: String?
     public private(set) var lastProcessIdentifier: Int?
     public private(set) var lastTokensUsed: Int
     public private(set) var lastError: String?
@@ -30,6 +31,74 @@ public final class CodexAppServerClient: CodexAppServerRunning {
         stallTimeoutSeconds: TimeInterval = 300
     ) async -> Bool {
         resetRunState()
+        return await performRun(
+            workspace: workspace,
+            prompt: prompt,
+            title: title,
+            onEvent: onEvent,
+            turnTimeoutSeconds: turnTimeoutSeconds,
+            stallTimeoutSeconds: stallTimeoutSeconds
+        ) { transport in
+            try transport.send([
+                "id": 2,
+                "method": "thread/start",
+                "params": [
+                    "approvalPolicy": "never",
+                    "sandbox": "none",
+                    "cwd": workspace,
+                ],
+            ])
+            return try await self.waitForThread(using: transport, responseId: 2, timeoutSeconds: stallTimeoutSeconds, onEvent: onEvent)
+        }
+    }
+
+    public func resume(
+        workspace: String,
+        threadId: String,
+        prompt: String,
+        title: String,
+        onEvent: @escaping (String) -> Void,
+        turnTimeoutSeconds: TimeInterval = 3600,
+        stallTimeoutSeconds: TimeInterval = 300
+    ) async -> Bool {
+        resetRunState()
+        lastThreadId = threadId
+        return await performRun(
+            workspace: workspace,
+            prompt: prompt,
+            title: title,
+            onEvent: onEvent,
+            turnTimeoutSeconds: turnTimeoutSeconds,
+            stallTimeoutSeconds: stallTimeoutSeconds
+        ) { transport in
+            try transport.send([
+                "id": 2,
+                "method": "thread/resume",
+                "params": [
+                    "threadId": threadId,
+                ],
+            ])
+            return try await self.waitForThread(using: transport, responseId: 2, timeoutSeconds: stallTimeoutSeconds, onEvent: onEvent)
+        }
+    }
+
+    private func resetRunState() {
+        lastThreadId = nil
+        lastThreadPath = nil
+        lastProcessIdentifier = nil
+        lastTokensUsed = 0
+        lastError = nil
+    }
+
+    private func performRun(
+        workspace: String,
+        prompt: String,
+        title: String,
+        onEvent: @escaping (String) -> Void,
+        turnTimeoutSeconds: TimeInterval,
+        stallTimeoutSeconds: TimeInterval,
+        prepareThread: @escaping (Transporting) async throws -> ThreadContext
+    ) async -> Bool {
         let transport = transportFactory()
 
         do {
@@ -53,23 +122,15 @@ public final class CodexAppServerClient: CodexAppServerRunning {
             ])
             try await waitForInitialized(using: transport, timeoutSeconds: stallTimeoutSeconds, onEvent: onEvent)
 
-            try transport.send([
-                "id": 2,
-                "method": "thread/start",
-                "params": [
-                    "approvalPolicy": "never",
-                    "sandbox": "none",
-                    "cwd": workspace,
-                ],
-            ])
-            let threadId = try await waitForThreadId(using: transport, timeoutSeconds: stallTimeoutSeconds, onEvent: onEvent)
-            lastThreadId = threadId
+            let thread = try await prepareThread(transport)
+            lastThreadId = thread.id
+            lastThreadPath = thread.path
 
             try transport.send([
                 "id": 3,
                 "method": "turn/start",
                 "params": [
-                    "threadId": threadId,
+                    "threadId": thread.id,
                     "input": [
                         [
                             "type": "text",
@@ -104,13 +165,6 @@ public final class CodexAppServerClient: CodexAppServerRunning {
         }
     }
 
-    private func resetRunState() {
-        lastThreadId = nil
-        lastProcessIdentifier = nil
-        lastTokensUsed = 0
-        lastError = nil
-    }
-
     private func waitForInitialized(
         using transport: Transporting,
         timeoutSeconds: TimeInterval,
@@ -126,11 +180,12 @@ public final class CodexAppServerClient: CodexAppServerRunning {
         }
     }
 
-    private func waitForThreadId(
+    private func waitForThread(
         using transport: Transporting,
+        responseId: Int,
         timeoutSeconds: TimeInterval,
         onEvent: @escaping (String) -> Void
-    ) async throws -> String {
+    ) async throws -> ThreadContext {
         while true {
             let message = try await waitForMessage(using: transport, timeoutSeconds: timeoutSeconds)
             onEvent(Self.describe(message: message))
@@ -140,9 +195,9 @@ public final class CodexAppServerClient: CodexAppServerRunning {
                 continue
             }
 
-            if message.id == 2 {
-                if let threadId = message.resultDictionary?["thread_id"] as? String {
-                    return threadId
+            if message.id == responseId {
+                if let thread = Self.extractThread(from: message.resultDictionary) {
+                    return thread
                 }
                 throw CodexAppServerClientError.missingThreadId
             }
@@ -239,6 +294,27 @@ public final class CodexAppServerClient: CodexAppServerRunning {
         return "rpc message"
     }
 
+    private static func extractThread(from result: [String: Any]?) -> ThreadContext? {
+        guard let result else {
+            return nil
+        }
+
+        if let threadId = result["thread_id"] as? String {
+            let path = (result["thread"] as? [String: Any])?["path"] as? String
+            return ThreadContext(id: threadId, path: path)
+        }
+
+        if let thread = result["thread"] as? [String: Any] {
+            let id = (thread["id"] as? String) ?? (thread["thread_id"] as? String)
+            let path = thread["path"] as? String
+            if let id {
+                return ThreadContext(id: id, path: path)
+            }
+        }
+
+        return nil
+    }
+
     private static func extractTokens(from value: Any?) -> Int {
         guard let value else {
             return 0
@@ -286,6 +362,11 @@ public final class CodexAppServerClient: CodexAppServerRunning {
 }
 
 extension CodexAppServerClient {
+    private struct ThreadContext {
+        let id: String
+        let path: String?
+    }
+
     private enum WaitOutcome {
         case message(Message)
         case endOfStream

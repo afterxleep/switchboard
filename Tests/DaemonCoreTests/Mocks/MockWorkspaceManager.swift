@@ -4,6 +4,7 @@ import Foundation
 final class MockWorkspaceManager: WorkspaceManaging {
     var receivedEvents: [DaemonEvent] = []
     var receivedRepoPaths: [String] = []
+    var receivedCleanupIds: [[String]] = []
     var stubbedWorkspacePath = "/tmp/workspace"
 
     func workspace(for event: DaemonEvent, repoPath: String) throws -> String {
@@ -12,5 +13,7 @@ final class MockWorkspaceManager: WorkspaceManaging {
         return stubbedWorkspacePath
     }
 
-    func cleanup(completedIds: [String]) throws {}
+    func cleanup(completedIds: [String]) throws {
+        receivedCleanupIds.append(completedIds)
+    }
 }

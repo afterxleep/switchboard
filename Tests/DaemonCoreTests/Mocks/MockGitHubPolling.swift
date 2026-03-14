@@ -10,6 +10,9 @@ final class MockGitHubPolling: GitHubPolling {
     var stubbedErrorSequence: [Error?] = []
     var receivedStates: [[String: StateEntry]] = []
     var pollCallCount = 0
+    var stubbedHasUnresolvedThreads = false
+    var stubbedHasConflicts = false
+    var stubbedCIIsPassing = false
 
     func poll(state: [String: StateEntry]) async throws -> [DaemonEvent] {
         receivedStates.append(state)
@@ -23,5 +26,17 @@ final class MockGitHubPolling: GitHubPolling {
         }
 
         return stubbedEvents
+    }
+
+    func hasUnresolvedThreads(prNumber: Int) async throws -> Bool {
+        stubbedHasUnresolvedThreads
+    }
+
+    func hasConflicts(prNumber: Int) async throws -> Bool {
+        stubbedHasConflicts
+    }
+
+    func ciIsPassing(prNumber: Int) async throws -> Bool {
+        stubbedCIIsPassing
     }
 }

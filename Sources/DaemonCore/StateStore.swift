@@ -70,6 +70,7 @@ public final class StateStore {
     public func markDone(id: String) throws {
         try updateEntry(id: id) { entry in
             entry.status = .done
+            entry.agentPhase = .done
             entry.updatedAt = Date()
         }
     }
@@ -79,7 +80,6 @@ public final class StateStore {
             entry.status = .pending
             entry.startedAt = nil
             entry.updatedAt = Date()
-            entry.sessionId = nil
             entry.agentPid = nil
             entry.tokensUsed = nil
         }
@@ -97,6 +97,92 @@ public final class StateStore {
             entry.tokensUsed = tokensUsed
             entry.updatedAt = Date()
         }
+    }
+
+    public func updateThread(
+        id: String,
+        sessionId: String?,
+        threadPath: String?
+    ) throws {
+        try updateEntry(id: id) { entry in
+            entry.sessionId = sessionId
+            entry.threadPath = threadPath
+            entry.updatedAt = Date()
+        }
+    }
+
+    public func updateLinearIssueId(id: String, linearIssueId: String) throws {
+        try updateEntry(id: id) { entry in
+            entry.linearIssueId = linearIssueId
+            entry.updatedAt = Date()
+        }
+    }
+
+    public func entry(forPR prNumber: Int) -> StateEntry? {
+        (try? load().values.first(where: { $0.prNumber == prNumber })) ?? nil
+    }
+
+    public func attachPR(id: String, prNumber: Int, threadPath: String?) throws {
+        try updateEntry(id: id) { entry in
+            entry.prNumber = prNumber
+            if let threadPath {
+                entry.threadPath = threadPath
+            }
+            entry.updatedAt = Date()
+        }
+    }
+
+    public func updatePhase(id: String, phase: AgentPhase) throws {
+        try updateEntry(id: id) { entry in
+            entry.agentPhase = phase
+            entry.updatedAt = Date()
+        }
+    }
+
+    public func markTurnStarted(id: String) throws {
+        try updateEntry(id: id) { entry in
+            let now = Date()
+            entry.lastTurnAt = now
+            entry.startedAt = now
+            entry.status = .inFlight
+            entry.updatedAt = now
+        }
+    }
+
+    public func incrementRetry(id: String) throws {
+        try updateEntry(id: id) { entry in
+            entry.retryCount += 1
+            entry.updatedAt = Date()
+        }
+    }
+
+    public func resetRetry(id: String) throws {
+        try updateEntry(id: id) { entry in
+            entry.retryCount = 0
+            entry.updatedAt = Date()
+        }
+    }
+
+    public func incrementConsecutiveCIFailures(id: String) throws -> Int {
+        var nextCount = 0
+        try updateEntry(id: id) { entry in
+            entry.consecutiveCIFailures += 1
+            nextCount = entry.consecutiveCIFailures
+            entry.updatedAt = Date()
+        }
+        return nextCount
+    }
+
+    public func resetConsecutiveCIFailures(id: String) throws {
+        try updateEntry(id: id) { entry in
+            entry.consecutiveCIFailures = 0
+            entry.updatedAt = Date()
+        }
+    }
+
+    public func allActive() -> [StateEntry] {
+        let state = (try? load()) ?? [:]
+        return state.values.filter { $0.agentPhase != .done }
     }
 
     public func isInFlight(id: String) -> Bool {

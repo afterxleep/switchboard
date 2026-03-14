@@ -12,6 +12,14 @@ public struct DaemonConfig {
     public let workspaceRoot: String
     public let repoPath: String
     public let workflowTemplatePath: String
+    public let workflowReviewTemplatePath: String
+    public let workflowCITemplatePath: String
+    public let workflowConflictTemplatePath: String
+    public let linearInProgressStateId: String
+    public let linearInReviewStateId: String
+    public let linearDoneStateId: String
+    public let maxAgentRetries: Int
+    public let ciFailureThreshold: Int
 
     public init(
         linearApiKey: String,
@@ -24,7 +32,15 @@ public struct DaemonConfig {
         codexCommand: String,
         workspaceRoot: String,
         repoPath: String,
-        workflowTemplatePath: String
+        workflowTemplatePath: String,
+        workflowReviewTemplatePath: String = "~/.flowdeck-daemon/WORKFLOW_REVIEW.md",
+        workflowCITemplatePath: String = "~/.flowdeck-daemon/WORKFLOW_CI.md",
+        workflowConflictTemplatePath: String = "~/.flowdeck-daemon/WORKFLOW_CONFLICT.md",
+        linearInProgressStateId: String = "1e3cbc8e-f483-4db2-9b56-f9b4c9a56989",
+        linearInReviewStateId: String = "6f88a8a8-a3d7-4f30-9980-47cebb6a2c91",
+        linearDoneStateId: String = "5f2c9f55-0b3d-4a86-83ff-42b84f88dbf5",
+        maxAgentRetries: Int = 3,
+        ciFailureThreshold: Int = 2
     ) {
         self.linearApiKey = linearApiKey
         self.linearTeamSlug = linearTeamSlug
@@ -37,6 +53,14 @@ public struct DaemonConfig {
         self.workspaceRoot = workspaceRoot
         self.repoPath = repoPath
         self.workflowTemplatePath = workflowTemplatePath
+        self.workflowReviewTemplatePath = workflowReviewTemplatePath
+        self.workflowCITemplatePath = workflowCITemplatePath
+        self.workflowConflictTemplatePath = workflowConflictTemplatePath
+        self.linearInProgressStateId = linearInProgressStateId
+        self.linearInReviewStateId = linearInReviewStateId
+        self.linearDoneStateId = linearDoneStateId
+        self.maxAgentRetries = maxAgentRetries
+        self.ciFailureThreshold = ciFailureThreshold
     }
 
     public static func fromEnvironment() throws -> DaemonConfig {
@@ -61,7 +85,15 @@ public struct DaemonConfig {
             codexCommand: environment["CODEX_COMMAND"] ?? "/opt/homebrew/bin/codex",
             workspaceRoot: environment["WORKSPACE_ROOT"] ?? "~/.flowdeck-daemon/workspaces",
             repoPath: environment["REPO_PATH"] ?? "~/Developer/flowdeck",
-            workflowTemplatePath: environment["WORKFLOW_TEMPLATE_PATH"] ?? "~/.flowdeck-daemon/WORKFLOW.md"
+            workflowTemplatePath: environment["WORKFLOW_TEMPLATE_PATH"] ?? "~/.flowdeck-daemon/WORKFLOW.md",
+            workflowReviewTemplatePath: environment["WORKFLOW_REVIEW_TEMPLATE_PATH"] ?? "~/.flowdeck-daemon/WORKFLOW_REVIEW.md",
+            workflowCITemplatePath: environment["WORKFLOW_CI_TEMPLATE_PATH"] ?? "~/.flowdeck-daemon/WORKFLOW_CI.md",
+            workflowConflictTemplatePath: environment["WORKFLOW_CONFLICT_TEMPLATE_PATH"] ?? "~/.flowdeck-daemon/WORKFLOW_CONFLICT.md",
+            linearInProgressStateId: environment["LINEAR_IN_PROGRESS_STATE_ID"] ?? "1e3cbc8e-f483-4db2-9b56-f9b4c9a56989",
+            linearInReviewStateId: environment["LINEAR_IN_REVIEW_STATE_ID"] ?? "6f88a8a8-a3d7-4f30-9980-47cebb6a2c91",
+            linearDoneStateId: environment["LINEAR_DONE_STATE_ID"] ?? "5f2c9f55-0b3d-4a86-83ff-42b84f88dbf5",
+            maxAgentRetries: Int(environment["MAX_AGENT_RETRIES"] ?? "") ?? 3,
+            ciFailureThreshold: Int(environment["CI_FAILURE_THRESHOLD"] ?? "") ?? 2
         )
     }
 }
