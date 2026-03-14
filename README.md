@@ -21,14 +21,63 @@ Built on top of the [OpenAI Codex CLI](https://github.com/openai/codex) app-serv
 ```
 Linear: Todo
     ↓  (daemon picks up issue)
-Linear: In Progress  ←──────────────────┐
-    ↓  (Codex codes, opens PR)           │
-    ↓  (CI passes, no open threads)      │
-Linear: In Review                        │
-    ↓  (new PR comment appears) ─────────┘
-    ↓  (PR merged + issue resolved)
+Linear: In Progress  ←──────────────────────────────────┐
+    ↓  (Codex codes, opens PR)                           │
+    ↓  (ALL conditions met — see gate below)             │
+Linear: In Review  ──── (new comment / CI red / conflict)┘
+    ↓  (approved + all conditions still met → auto-merge)
 Linear: Done  ✓
 ```
+
+---
+
+## The state machine — the most important part
+
+> **The flow is the product. Without a predictable, consistent flow, the tool is useless.**
+
+### In Progress
+
+An issue is **In Progress** whenever any of the following is true — even one:
+
+- The agent is actively running (coding, fixing CI, addressing comments)
+- CI is failing
+- There are unresolved review threads on the PR
+- There are merge conflicts
+- The PR is not yet open
+
+**Default state for any active work. When in doubt: In Progress.**
+
+### In Review
+
+An issue moves to **In Review** only when ALL of the following are simultaneously true:
+
+| Condition | Must be |
+|-----------|---------|
+| CI | ✅ 100% green, all checks passed |
+| Review threads | ✅ Zero unresolved |
+| Merge conflicts | ✅ None |
+| Agent | ✅ Not currently running |
+
+This is a gate, not a step. All four conditions are checked atomically before any transition. One false → stays In Progress.
+
+### In Review is not a terminal state
+
+**The daemon continues actively monitoring every PR in In Review on every tick.**
+
+If any condition changes — a new comment appears, CI reruns and goes red, a conflict emerges — the daemon immediately:
+1. Moves the Linear issue back to **In Progress**
+2. Resumes the Codex session (same thread, full context)
+3. Addresses the new work
+
+A PR is never forgotten. It stays in active tracking from the moment the issue is picked up until the merge is confirmed in GitHub.
+
+### Done
+
+An issue is **Done** only when both are true:
+- PR is **actively merged** in GitHub
+- Linear issue is closed
+
+"Approved" is not done. "Ready to merge" is not done. Merged is done.
 
 ---
 
