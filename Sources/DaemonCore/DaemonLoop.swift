@@ -163,6 +163,29 @@ public final class DaemonLoop {
                 return
             }
 
+            // Check if a PR already exists for this issue before spawning Codex
+            if let existing = try? await githubPoller.findOpenPR(for: identifier) {
+                let entry = StateEntry(
+                    id: eventId,
+                    status: .inFlight,
+                    eventType: event.eventType,
+                    details: event.details,
+                    startedAt: Date(),
+                    updatedAt: Date(),
+                    prNumber: existing.prNumber,
+                    prTitle: existing.title,
+                    linearIssueId: id,
+                    agentPhase: .waitingOnCI
+                )
+                try stateStore.upsert(entry)
+                try? await linearStateManager?.moveToInProgress(issueId: id)
+                logger("attached existing PR #\(existing.prNumber) to \(identifier)")
+                if config.githubReviewer.isEmpty == false {
+                    try? await prReviewRequester?.requestReview(pr: existing.prNumber, reviewer: config.githubReviewer)
+                }
+                return
+            }
+
             let entry = StateEntry(
                 id: eventId,
                 status: .pending,

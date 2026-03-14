@@ -5,4 +5,5 @@ public protocol GitHubPolling {
     func hasUnresolvedThreads(prNumber: Int) async throws -> Bool
     func hasConflicts(prNumber: Int) async throws -> Bool
     func ciIsPassing(prNumber: Int) async throws -> Bool
+    func findOpenPR(for issueIdentifier: String) async throws -> (prNumber: Int, branch: String, title: String)?
 }

@@ -12,7 +12,7 @@ public final class LinearPoller: LinearPolling {
         apiKey: String,
         teamSlug: String,
         assigneeId: String = "",
-        activeStates: [String] = ["todo", "in progress"],
+        activeStates: [String] = ["todo", "in progress", "in review"],
         terminalStates: [String] = ["done", "cancelled", "canceled", "closed", "duplicate"],
         urlSession: URLSession? = nil
     ) {

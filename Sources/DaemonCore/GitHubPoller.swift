@@ -109,6 +109,15 @@ public final class GitHubPoller: GitHubPolling {
         return try await checksAllSucceeded(sha: pullRequest.head.sha)
     }
 
+    public func findOpenPR(for issueIdentifier: String) async throws -> (prNumber: Int, branch: String, title: String)? {
+        let open = try await fetchPullRequests(state: "open")
+        let lower = issueIdentifier.lowercased()
+        guard let pr = open.first(where: { $0.head.ref.lowercased().contains(lower) }) else {
+            return nil
+        }
+        return (pr.number, pr.head.ref, pr.title ?? "")
+    }
+
     private func fetchPullRequests(state: String) async throws -> [GitHubPullRequest] {
         try await get(path: "/repos/\(repo)/pulls?state=\(state)")
     }

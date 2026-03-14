@@ -555,6 +555,51 @@ final class DaemonLoopLifecycleTests: XCTestCase {
         XCTAssertEqual(githubPoller.receivedUnresolvedThreadPRNumbers, [145])
     }
 
+    func test_newIssue_whenOpenPRExists_attachesPRInsteadOfSpawningAgent() async throws {
+        // Arrange
+        let store = makeStore()
+        let runner = MockAgentRunner()
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedExistingPR = (prNumber: 55, branch: "kai/db-201-fix-thing", title: "Fix thing")
+        let linearManager = MockLinearStateManager()
+        let loop = DaemonLoop(
+            config: DaemonConfig(
+                linearApiKey: "linear-token",
+                linearTeamSlug: "DB",
+                linearAssigneeId: "",
+                githubToken: "github-token",
+                githubRepo: "afterxleep/flowdeck",
+                githubReviewer: "",
+                pollIntervalSeconds: 30,
+                inFlightTimeoutSeconds: 120,
+                stateFilePath: store.stateFilePath,
+                codexCommand: "/opt/homebrew/bin/codex",
+                workspaceRoot: "~/.flowdeck-daemon/workspaces",
+                repoPath: "~/Developer/flowdeck",
+                workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md",
+                maxAgentRetries: 3
+            ),
+            linearPoller: MockLinearPolling(),
+            githubPoller: githubPoller,
+            dispatcher: MockEventDispatching(),
+            stateStore: store,
+            agentRunner: runner,
+            linearStateManager: linearManager
+        )
+
+        // Act
+        let newIssueEvent = DaemonEvent.newIssue(id: "issue-201", identifier: "DB-201", title: "Fix thing", description: nil)
+        try await loop.routeForTesting(newIssueEvent)
+
+        // Assert — PR attached, no agent spawned
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["linear:DB-201"])
+        XCTAssertEqual(entry.prNumber, 55)
+        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI)
+        XCTAssertTrue(runner.receivedEvents.isEmpty, "Codex should not be spawned when PR already exists")
+        XCTAssertEqual(githubPoller.receivedFindOpenPRIdentifiers, ["DB-201"])
+    }
+
     func test_routeForTesting_whenPullRequestOpensWithoutMatchingBranch_keepsStateUnchanged() async throws {
         let stateStore = makeStore()
         try stateStore.upsert(
