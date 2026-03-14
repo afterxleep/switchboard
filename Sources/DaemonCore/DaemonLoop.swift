@@ -153,7 +153,7 @@ public final class DaemonLoop {
 
     private func route(event: DaemonEvent) async throws {
         switch event {
-        case let .newIssue(id, identifier, _, _):
+        case let .newIssue(id, identifier, _, _, linkedPRNumber):
             guard agentRunner != nil else {
                 try dispatcher.dispatch(event)
                 return
@@ -163,8 +163,15 @@ public final class DaemonLoop {
                 return
             }
 
-            // Check if a PR already exists for this issue before spawning Codex
-            if let existing = try? await githubPoller.findOpenPR(for: identifier) {
+            // Use PR linked directly on the Linear issue, then fall back to branch-name search
+            let existingPR: (prNumber: Int, branch: String, title: String)?
+            if let prNum = linkedPRNumber {
+                existingPR = (prNum, "", "")
+            } else {
+                existingPR = try? await githubPoller.findOpenPR(for: identifier)
+            }
+
+            if let existing = existingPR {
                 let entry = StateEntry(
                     id: eventId,
                     status: .inFlight,
@@ -202,13 +209,30 @@ public final class DaemonLoop {
             startAgent(for: event, entryId: "linear:\(identifier)")
 
         case let .prOpened(pr, branch, title):
-            guard let entry = entryForBranch(branch) else {
-                return
+            if let entry = entryForBranch(branch) {
+                // Known issue — attach PR and move to CI monitoring
+                try stateStore.attachPR(id: entry.id, prNumber: pr, title: title, threadPath: entry.threadPath)
+                try stateStore.updatePhase(id: entry.id, phase: .waitingOnCI)
+            } else if stateStore.entry(forPR: pr) == nil {
+                // Standalone PR with no linked Linear issue — monitor it as its own task
+                let entryId = "gh:pr:\(pr)"
+                guard (try? stateStore.load()[entryId]) == nil else { break }
+                let entry = StateEntry(
+                    id: entryId,
+                    status: .inFlight,
+                    eventType: event.eventType,
+                    details: title,
+                    startedAt: Date(),
+                    updatedAt: Date(),
+                    prNumber: pr,
+                    prTitle: title,
+                    agentPhase: .waitingOnCI
+                )
+                try stateStore.upsert(entry)
+                logger("standalone PR #\(pr) (\(branch)) — monitoring without Linear issue")
             }
-            try stateStore.attachPR(id: entry.id, prNumber: pr, title: title, threadPath: entry.threadPath)
-            try stateStore.updatePhase(id: entry.id, phase: .waitingOnCI)
             guard config.githubReviewer.isEmpty == false else {
-                return
+                break
             }
             do {
                 try await prReviewRequester?.requestReview(pr: pr, reviewer: config.githubReviewer)

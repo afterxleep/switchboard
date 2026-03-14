@@ -51,7 +51,8 @@ public final class LinearPoller: LinearPolling {
                     id: issue.id,
                     identifier: issue.identifier,
                     title: issue.title,
-                    description: issue.description
+                    description: issue.description,
+                    linkedPRNumber: issue.linkedPRNumber
                 )
             }
 
@@ -82,6 +83,7 @@ public final class LinearPoller: LinearPolling {
                   title
                   description
                   state { name }
+                  attachments { nodes { url } }
                 }
               }
             }
@@ -143,8 +145,29 @@ private struct LinearIssue: Decodable {
     let title: String
     let description: String?
     let state: LinearIssueState
+    let attachments: LinearAttachments?
+
+    var linkedPRNumber: Int? {
+        guard let nodes = attachments?.nodes else { return nil }
+        for node in nodes {
+            if let url = node.url,
+               let match = url.range(of: #"/pull/(\d+)$"#, options: .regularExpression) {
+                let numStr = url[match].replacingOccurrences(of: "/pull/", with: "")
+                return Int(numStr)
+            }
+        }
+        return nil
+    }
 }
 
 private struct LinearIssueState: Decodable {
     let name: String
+}
+
+private struct LinearAttachments: Decodable {
+    let nodes: [LinearAttachment]
+}
+
+private struct LinearAttachment: Decodable {
+    let url: String?
 }

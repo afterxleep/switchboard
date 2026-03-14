@@ -1,7 +1,7 @@
 import Foundation
 
 public enum DaemonEvent: Equatable {
-    case newIssue(id: String, identifier: String, title: String, description: String?)
+    case newIssue(id: String, identifier: String, title: String, description: String?, linkedPRNumber: Int? = nil)
     case issueCancelled(id: String, identifier: String)
     case prOpened(pr: Int, branch: String, title: String)
     case prClosed(pr: Int, branch: String)
@@ -15,7 +15,7 @@ public enum DaemonEvent: Equatable {
 
     public var eventId: String {
         switch self {
-        case let .newIssue(_, identifier, _, _):
+        case let .newIssue(_, identifier, _, _, _):
             return "linear:\(identifier)"
         case let .issueCancelled(_, identifier):
             return "linear:\(identifier)"
@@ -69,7 +69,7 @@ public enum DaemonEvent: Equatable {
 
     public var messageIdentifier: String {
         switch self {
-        case let .newIssue(_, identifier, _, _):
+        case let .newIssue(_, identifier, _, _, _):
             return identifier
         case let .issueCancelled(_, identifier):
             return identifier
@@ -96,7 +96,7 @@ public enum DaemonEvent: Equatable {
 
     public var details: String {
         switch self {
-        case let .newIssue(_, identifier, title, description):
+        case let .newIssue(_, identifier, title, description, _):
             if let description, description.isEmpty == false {
                 return "\(identifier): \(title) — \(description)"
             }

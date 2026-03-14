@@ -114,7 +114,7 @@ public final class AgentRunner: AgentRunning {
 
     private func renderPrompt(event: DaemonEvent, context: AgentContext) -> String {
         switch event {
-        case let .newIssue(_, _, _, description):
+        case let .newIssue(_, _, _, description, _):
             return applyCommonPlaceholders(
                 workflowTemplate,
                 context: context,
@@ -211,7 +211,7 @@ public final class AgentRunner: AgentRunning {
         let identifier: String
 
         switch event {
-        case let .newIssue(id, issueIdentifier, title, _):
+        case let .newIssue(id, issueIdentifier, title, _, _):
             entry = state[event.eventId] ?? StateEntry(
                 id: event.eventId,
                 status: .pending,
