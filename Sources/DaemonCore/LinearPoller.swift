@@ -70,7 +70,7 @@ public final class LinearPoller: LinearPolling {
 
         if assigneeId.isEmpty == false {
             query = """
-            query Issues($teamSlug: String!, $assigneeId: String!) {
+            query Issues($teamSlug: String!, $assigneeId: ID!) {
               issues(filter: {
                 team: { key: { eq: $teamSlug } }
                 state: { type: { eq: "unstarted" } }
