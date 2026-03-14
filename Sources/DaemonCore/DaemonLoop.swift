@@ -153,6 +153,23 @@ public final class DaemonLoop {
             try stateStore.updatePhase(id: entry.id, phase: .waitingOnCI)
             logger("self-healed \(entry.id): no threads/conflicts, advancing to waitingOnCI")
         }
+
+        // Self-heal: waitingOnCI entries where CI is already passing → advance to review
+        // Catches PRs where CI passed before the entry was created (missed transition event)
+        for entry in state.values where entry.agentPhase == .waitingOnCI {
+            guard let prNumber = entry.prNumber else { continue }
+            let passing = (try? await githubPoller.ciIsPassing(prNumber: prNumber)) ?? false
+            guard passing else { continue }
+            let hasThreads = (try? await githubPoller.hasUnresolvedThreads(prNumber: prNumber)) ?? false
+            let nextPhase: AgentPhase = hasThreads ? .addressingFeedback : .waitingOnReview
+            try stateStore.updatePhase(id: entry.id, phase: nextPhase)
+            if hasThreads, let linearIssueId = entry.linearIssueId {
+                try? await linearStateManager?.moveToInProgress(issueId: linearIssueId)
+            } else if let linearIssueId = entry.linearIssueId {
+                try? await linearStateManager?.moveToInReview(issueId: linearIssueId)
+            }
+            logger("self-healed \(entry.id): CI already passing, advancing to \(nextPhase)")
+        }
     }
 
     private var stopped: Bool {

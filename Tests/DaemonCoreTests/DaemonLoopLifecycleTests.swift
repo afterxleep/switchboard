@@ -872,4 +872,91 @@ extension DaemonLoopLifecycleTests {
         // Assert — only 1 agent started despite 2 events
         XCTAssertEqual(runner.receivedEvents.count, 1, "concurrency cap should defer the second agent")
     }
+    func test_reconcile_whenWaitingOnCIButCIAlreadyPassing_advancesToWaitingOnReview() async throws {
+        // Arrange
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-500",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-500",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 200,
+            linearIssueId: "issue-500",
+            agentPhase: .waitingOnCI
+        ))
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedCIIsPassing = true
+        githubPoller.stubbedHasUnresolvedThreads = false
+        let linearManager = MockLinearStateManager()
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: linearManager)
+
+        // Act
+        try await loop.reconcile()
+
+        // Assert
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["linear:DB-500"])
+        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnReview)
+        XCTAssertEqual(linearManager.inReviewIssueIds, ["issue-500"])
+    }
+
+    func test_reconcile_whenWaitingOnCIButCIAlreadyPassingWithThreads_advancesToAddressingFeedback() async throws {
+        // Arrange
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-501",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-501",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 201,
+            linearIssueId: "issue-501",
+            agentPhase: .waitingOnCI
+        ))
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedCIIsPassing = true
+        githubPoller.stubbedHasUnresolvedThreads = true
+        let linearManager = MockLinearStateManager()
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: linearManager)
+
+        // Act
+        try await loop.reconcile()
+
+        // Assert
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["linear:DB-501"])
+        XCTAssertEqual(entry.agentPhase, AgentPhase.addressingFeedback)
+        XCTAssertEqual(linearManager.inProgressIssueIds, ["issue-501"])
+    }
+
+    func test_reconcile_whenWaitingOnCIAndCINotPassing_keepsPhase() async throws {
+        // Arrange
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-502",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-502",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 202,
+            linearIssueId: "issue-502",
+            agentPhase: .waitingOnCI
+        ))
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedCIIsPassing = false
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
+
+        // Act
+        try await loop.reconcile()
+
+        // Assert
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["linear:DB-502"])
+        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI)
+    }
+
 }
