@@ -8,6 +8,10 @@ public struct DaemonConfig {
     public let pollIntervalSeconds: TimeInterval
     public let inFlightTimeoutSeconds: TimeInterval
     public let stateFilePath: String
+    public let codexCommand: String
+    public let workspaceRoot: String
+    public let repoPath: String
+    public let workflowTemplatePath: String
 
     public init(
         linearApiKey: String,
@@ -16,7 +20,11 @@ public struct DaemonConfig {
         githubRepo: String,
         pollIntervalSeconds: TimeInterval,
         inFlightTimeoutSeconds: TimeInterval,
-        stateFilePath: String
+        stateFilePath: String,
+        codexCommand: String,
+        workspaceRoot: String,
+        repoPath: String,
+        workflowTemplatePath: String
     ) {
         self.linearApiKey = linearApiKey
         self.linearTeamSlug = linearTeamSlug
@@ -25,6 +33,10 @@ public struct DaemonConfig {
         self.pollIntervalSeconds = pollIntervalSeconds
         self.inFlightTimeoutSeconds = inFlightTimeoutSeconds
         self.stateFilePath = stateFilePath
+        self.codexCommand = codexCommand
+        self.workspaceRoot = workspaceRoot
+        self.repoPath = repoPath
+        self.workflowTemplatePath = workflowTemplatePath
     }
 
     public static func fromEnvironment() throws -> DaemonConfig {
@@ -45,7 +57,11 @@ public struct DaemonConfig {
             githubRepo: environment["GITHUB_REPO"] ?? "afterxleep/flowdeck",
             pollIntervalSeconds: TimeInterval(environment["POLL_INTERVAL_SECONDS"] ?? "") ?? 30,
             inFlightTimeoutSeconds: TimeInterval(environment["INFLIGHT_TIMEOUT_SECONDS"] ?? "") ?? 1800,
-            stateFilePath: "~/.flowdeck-daemon/state.json"
+            stateFilePath: "~/.flowdeck-daemon/state.json",
+            codexCommand: environment["CODEX_COMMAND"] ?? "/opt/homebrew/bin/codex",
+            workspaceRoot: environment["WORKSPACE_ROOT"] ?? "~/.flowdeck-daemon/workspaces",
+            repoPath: environment["REPO_PATH"] ?? "~/Developer/flowdeck",
+            workflowTemplatePath: environment["WORKFLOW_TEMPLATE_PATH"] ?? "~/.flowdeck-daemon/WORKFLOW.md"
         )
     }
 }

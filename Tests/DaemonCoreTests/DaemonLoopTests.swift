@@ -76,7 +76,11 @@ final class DaemonLoopTests: XCTestCase {
             githubRepo: "afterxleep/flowdeck",
             pollIntervalSeconds: 30,
             inFlightTimeoutSeconds: 120,
-            stateFilePath: stateStore.stateFilePath
+            stateFilePath: stateStore.stateFilePath,
+            codexCommand: "/opt/homebrew/bin/codex",
+            workspaceRoot: "~/.flowdeck-daemon/workspaces",
+            repoPath: "~/Developer/flowdeck",
+            workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md"
         )
         var loop: DaemonLoop!
         loop = DaemonLoop(
@@ -128,7 +132,11 @@ final class DaemonLoopTests: XCTestCase {
             githubRepo: "afterxleep/flowdeck",
             pollIntervalSeconds: 0.01,
             inFlightTimeoutSeconds: 120,
-            stateFilePath: stateStore.stateFilePath
+            stateFilePath: stateStore.stateFilePath,
+            codexCommand: "/opt/homebrew/bin/codex",
+            workspaceRoot: "~/.flowdeck-daemon/workspaces",
+            repoPath: "~/Developer/flowdeck",
+            workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md"
         )
         var loop: DaemonLoop!
         loop = DaemonLoop(
@@ -172,7 +180,11 @@ final class DaemonLoopTests: XCTestCase {
             githubRepo: "afterxleep/flowdeck",
             pollIntervalSeconds: 0,
             inFlightTimeoutSeconds: 120,
-            stateFilePath: stateStore.stateFilePath
+            stateFilePath: stateStore.stateFilePath,
+            codexCommand: "/opt/homebrew/bin/codex",
+            workspaceRoot: "~/.flowdeck-daemon/workspaces",
+            repoPath: "~/Developer/flowdeck",
+            workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md"
         )
         var loop: DaemonLoop!
         loop = DaemonLoop(
@@ -195,8 +207,208 @@ final class DaemonLoopTests: XCTestCase {
 
         // Assert
         XCTAssertEqual(linearPoller.pollCallCount, 2)
-        XCTAssertEqual(loggedMessages.count, 1)
-        XCTAssertTrue(loggedMessages[0].contains("forced"))
+        XCTAssertTrue(loggedMessages.contains(where: { $0.contains("forced") }))
+    }
+
+    func test_tick_continuesWhenGitHubPollerThrows() async throws {
+        // Arrange
+        let stateStore = makeStore()
+        let linearPoller = MockLinearPolling()
+        linearPoller.stubbedEvents = [
+            .newIssue(id: "issue-1", identifier: "DB-200", title: "Survives GitHub failure", description: nil)
+        ]
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedErrorSequence = [URLError(.notConnectedToInternet)]
+        let dispatcher = MockEventDispatching()
+        let completionWatcher = MockCompletionWatching()
+        var loggedMessages: [String] = []
+        let config = DaemonConfig(
+            linearApiKey: "linear-token",
+            linearTeamSlug: "daniel-bernal",
+            githubToken: "github-token",
+            githubRepo: "afterxleep/flowdeck",
+            pollIntervalSeconds: 30,
+            inFlightTimeoutSeconds: 120,
+            stateFilePath: stateStore.stateFilePath,
+            codexCommand: "/opt/homebrew/bin/codex",
+            workspaceRoot: "~/.flowdeck-daemon/workspaces",
+            repoPath: "~/Developer/flowdeck",
+            workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md"
+        )
+        let loop = DaemonLoop(
+            config: config,
+            linearPoller: linearPoller,
+            githubPoller: githubPoller,
+            dispatcher: dispatcher,
+            stateStore: stateStore,
+            completionWatcher: completionWatcher,
+            logger: { loggedMessages.append($0) }
+        )
+
+        // Act — tick must NOT throw
+        try await loop.tick()
+
+        // Assert
+        XCTAssertEqual(linearPoller.pollCallCount, 1)
+        XCTAssertEqual(
+            dispatcher.receivedDispatchedEvents,
+            [.newIssue(id: "issue-1", identifier: "DB-200", title: "Survives GitHub failure", description: nil)]
+        )
+        XCTAssertTrue(loggedMessages.contains(where: { $0.contains("github poll error") }))
+    }
+
+    func test_tick_continuesWhenLinearPollerThrows() async throws {
+        // Arrange
+        let stateStore = makeStore()
+        let linearPoller = MockLinearPolling()
+        linearPoller.stubbedErrorSequence = [MockLinearPolling.MockError.forced]
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedEvents = [.approved(pr: 99, branch: "feature/resilient")]
+        let dispatcher = MockEventDispatching()
+        let completionWatcher = MockCompletionWatching()
+        var loggedMessages: [String] = []
+        let config = DaemonConfig(
+            linearApiKey: "linear-token",
+            linearTeamSlug: "daniel-bernal",
+            githubToken: "github-token",
+            githubRepo: "afterxleep/flowdeck",
+            pollIntervalSeconds: 30,
+            inFlightTimeoutSeconds: 120,
+            stateFilePath: stateStore.stateFilePath,
+            codexCommand: "/opt/homebrew/bin/codex",
+            workspaceRoot: "~/.flowdeck-daemon/workspaces",
+            repoPath: "~/Developer/flowdeck",
+            workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md"
+        )
+        let loop = DaemonLoop(
+            config: config,
+            linearPoller: linearPoller,
+            githubPoller: githubPoller,
+            dispatcher: dispatcher,
+            stateStore: stateStore,
+            completionWatcher: completionWatcher,
+            logger: { loggedMessages.append($0) }
+        )
+
+        // Act — tick must NOT throw
+        try await loop.tick()
+
+        // Assert
+        XCTAssertEqual(githubPoller.pollCallCount, 1)
+        XCTAssertEqual(
+            dispatcher.receivedDispatchedEvents,
+            [.approved(pr: 99, branch: "feature/resilient")]
+        )
+        XCTAssertTrue(loggedMessages.contains(where: { $0.contains("linear poll error") }))
+    }
+
+    func test_run_continuesAfterTickError() async {
+        // Arrange
+        let stateStore = makeStore()
+        let linearPoller = MockLinearPolling()
+        linearPoller.stubbedErrorSequence = [MockLinearPolling.MockError.forced, nil]
+        linearPoller.stubbedEvents = [
+            .newIssue(id: "issue-1", identifier: "DB-201", title: "Second tick works", description: nil)
+        ]
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedErrorSequence = [MockGitHubPolling.MockError.forced, nil]
+        githubPoller.stubbedEvents = [.approved(pr: 50, branch: "feature/recovery")]
+        let dispatcher = MockEventDispatching()
+        let completionWatcher = MockCompletionWatching()
+        var loggedMessages: [String] = []
+        let config = DaemonConfig(
+            linearApiKey: "linear-token",
+            linearTeamSlug: "daniel-bernal",
+            githubToken: "github-token",
+            githubRepo: "afterxleep/flowdeck",
+            pollIntervalSeconds: 0,
+            inFlightTimeoutSeconds: 120,
+            stateFilePath: stateStore.stateFilePath,
+            codexCommand: "/opt/homebrew/bin/codex",
+            workspaceRoot: "~/.flowdeck-daemon/workspaces",
+            repoPath: "~/Developer/flowdeck",
+            workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md"
+        )
+        var loop: DaemonLoop!
+        loop = DaemonLoop(
+            config: config,
+            linearPoller: linearPoller,
+            githubPoller: githubPoller,
+            dispatcher: dispatcher,
+            stateStore: stateStore,
+            completionWatcher: completionWatcher,
+            logger: { loggedMessages.append($0) },
+            sleep: { _ in
+                if linearPoller.pollCallCount >= 2 {
+                    loop.stop()
+                }
+            }
+        )
+
+        // Act
+        await loop.run()
+
+        // Assert — both ticks executed
+        XCTAssertEqual(linearPoller.pollCallCount, 2)
+        XCTAssertEqual(githubPoller.pollCallCount, 2)
+        // First tick: both pollers threw, no events dispatched
+        // Second tick: both pollers succeed, events dispatched
+        XCTAssertEqual(dispatcher.receivedDispatchedEvents, [
+            .newIssue(id: "issue-1", identifier: "DB-201", title: "Second tick works", description: nil),
+            .approved(pr: 50, branch: "feature/recovery"),
+        ])
+    }
+
+    func test_tick_whenAgentRunnerPresent_routesNewIssueToAgentRunner() async throws {
+        // Arrange
+        let stateStore = makeStore()
+        let linearPoller = MockLinearPolling()
+        linearPoller.stubbedEvents = [
+            .newIssue(id: "issue-7", identifier: "DB-196", title: "Agent path", description: "Run codex")
+        ]
+        let githubPoller = MockGitHubPolling()
+        let dispatcher = MockEventDispatching()
+        let completionWatcher = MockCompletionWatching()
+        let agentRunner = MockAgentRunner()
+        agentRunner.stubbedResult = AgentResult(success: true, tokensUsed: 144, error: nil)
+        let config = DaemonConfig(
+            linearApiKey: "linear-token",
+            linearTeamSlug: "daniel-bernal",
+            githubToken: "github-token",
+            githubRepo: "afterxleep/flowdeck",
+            pollIntervalSeconds: 30,
+            inFlightTimeoutSeconds: 120,
+            stateFilePath: stateStore.stateFilePath,
+            codexCommand: "/opt/homebrew/bin/codex",
+            workspaceRoot: "~/.flowdeck-daemon/workspaces",
+            repoPath: "~/Developer/flowdeck",
+            workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md"
+        )
+        let loop = DaemonLoop(
+            config: config,
+            linearPoller: linearPoller,
+            githubPoller: githubPoller,
+            dispatcher: dispatcher,
+            stateStore: stateStore,
+            agentRunner: agentRunner,
+            completionWatcher: completionWatcher,
+            logger: { _ in }
+        )
+
+        // Act
+        try await loop.tick()
+        linearPoller.stubbedEvents = []
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        try await loop.tick()
+
+        // Assert
+        XCTAssertTrue(dispatcher.receivedDispatchedEvents.isEmpty)
+        XCTAssertEqual(
+            agentRunner.receivedEvents,
+            [.newIssue(id: "issue-7", identifier: "DB-196", title: "Agent path", description: "Run codex")]
+        )
+        let state = try stateStore.load()
+        XCTAssertEqual(state["linear:DB-196"]?.status, .done)
     }
 
     private func makeStore() -> StateStore {

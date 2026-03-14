@@ -34,7 +34,11 @@ private func makeConfig() -> DaemonConfig {
                 githubRepo: config.githubRepo,
                 pollIntervalSeconds: intervalOverride,
                 inFlightTimeoutSeconds: config.inFlightTimeoutSeconds,
-                stateFilePath: config.stateFilePath
+                stateFilePath: config.stateFilePath,
+                codexCommand: config.codexCommand,
+                workspaceRoot: config.workspaceRoot,
+                repoPath: config.repoPath,
+                workflowTemplatePath: config.workflowTemplatePath
             )
         }
         return config
@@ -85,12 +89,34 @@ let githubPoller = GitHubPoller(
 )
 let dispatcher = EventDispatcher(stateStore: stateStore)
 let completionWatcher = CompletionWatcher()
+let workflowTemplatePath = NSString(string: config.workflowTemplatePath).expandingTildeInPath
+let agentRunner: AgentRunner?
+if let workflowTemplate = try? String(contentsOfFile: workflowTemplatePath, encoding: .utf8) {
+    agentRunner = AgentRunner(
+        repoPath: config.repoPath,
+        workflowTemplate: workflowTemplate,
+        workspaceManager: WorkspaceManager(rootPath: config.workspaceRoot),
+        codexClient: CodexAppServerClient(codexPath: config.codexCommand),
+        stateStore: stateStore,
+        logger: { message in
+            logJSON(level: "info", message: message, metadata: [:])
+        }
+    )
+} else {
+    agentRunner = nil
+    logJSON(
+        level: "info",
+        message: "workflow template missing, falling back to openclaw dispatch",
+        metadata: ["path": workflowTemplatePath]
+    )
+}
 let loop = DaemonLoop(
     config: config,
     linearPoller: linearPoller,
     githubPoller: githubPoller,
     dispatcher: dispatcher,
     stateStore: stateStore,
+    agentRunner: agentRunner,
     completionWatcher: completionWatcher,
     logger: { message in
         // Use "error" level only for actual errors; routine dispatch messages use "info"

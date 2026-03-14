@@ -13,6 +13,9 @@ public struct StateEntry: Codable, Equatable {
     public let details: String
     public var startedAt: Date?
     public var updatedAt: Date
+    public var sessionId: String?
+    public var agentPid: Int?
+    public var tokensUsed: Int?
 
     public init(
         id: String,
@@ -20,7 +23,10 @@ public struct StateEntry: Codable, Equatable {
         eventType: String,
         details: String,
         startedAt: Date?,
-        updatedAt: Date
+        updatedAt: Date,
+        sessionId: String? = nil,
+        agentPid: Int? = nil,
+        tokensUsed: Int? = nil
     ) {
         self.id = id
         self.status = status
@@ -28,6 +34,9 @@ public struct StateEntry: Codable, Equatable {
         self.details = details
         self.startedAt = startedAt
         self.updatedAt = updatedAt
+        self.sessionId = sessionId
+        self.agentPid = agentPid
+        self.tokensUsed = tokensUsed
     }
 
     public func timedOut(after timeoutSeconds: TimeInterval) -> Bool {

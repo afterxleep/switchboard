@@ -64,7 +64,7 @@ final class LinearPollerTests: XCTestCase {
         XCTAssertEqual(events, [.issueCancelled(id: "issue-1", identifier: "DB-190")])
     }
 
-    func test_poll_whenIssueAlreadyKnownInActiveState_skipsDuplicateNewIssueEvent() async throws {
+    func test_poll_whenIssueIsPendingInActiveState_requeuesNewIssueEvent() async throws {
         let poller = LinearPoller(apiKey: "linear-token", teamSlug: "DB", urlSession: session)
         MockURLProtocol.requestHandler = { _ in
             Self.makeResponse(body: """
@@ -78,11 +78,14 @@ final class LinearPollerTests: XCTestCase {
             """)
         }
 
-        // Issue is known (pending) — should NOT emit a second newIssue
+        // Pending issues are eligible for re-queue after reconcile.
         let state = Self.makeState(id: "linear:DB-190", status: .pending)
         let events = try await poller.poll(state: state)
 
-        XCTAssertTrue(events.isEmpty)
+        XCTAssertEqual(
+            events,
+            [.newIssue(id: "issue-1", identifier: "DB-190", title: "Fix daemon", description: nil)]
+        )
     }
 
     func test_poll_whenIssueIsAlreadyInFlight_skipsEvent() async throws {

@@ -9,6 +9,10 @@ final class DaemonConfigTests: XCTestCase {
         unsetenv("GITHUB_REPO")
         unsetenv("POLL_INTERVAL_SECONDS")
         unsetenv("INFLIGHT_TIMEOUT_SECONDS")
+        unsetenv("CODEX_COMMAND")
+        unsetenv("WORKSPACE_ROOT")
+        unsetenv("REPO_PATH")
+        unsetenv("WORKFLOW_TEMPLATE_PATH")
         super.tearDown()
     }
 
@@ -31,6 +35,10 @@ final class DaemonConfigTests: XCTestCase {
             NSString(string: config.stateFilePath).expandingTildeInPath,
             NSString(string: "~/.flowdeck-daemon/state.json").expandingTildeInPath
         )
+        XCTAssertEqual(config.codexCommand, "/opt/homebrew/bin/codex")
+        XCTAssertEqual(config.workspaceRoot, "~/.flowdeck-daemon/workspaces")
+        XCTAssertEqual(config.repoPath, "~/Developer/flowdeck")
+        XCTAssertEqual(config.workflowTemplatePath, "~/.flowdeck-daemon/WORKFLOW.md")
     }
 
     func test_fromEnvironment_whenOptionalValuesPresent_loadsOverrides() throws {
@@ -41,6 +49,10 @@ final class DaemonConfigTests: XCTestCase {
         setenv("GITHUB_REPO", "acme/daemon", 1)
         setenv("POLL_INTERVAL_SECONDS", "45", 1)
         setenv("INFLIGHT_TIMEOUT_SECONDS", "900", 1)
+        setenv("CODEX_COMMAND", "/usr/local/bin/codex", 1)
+        setenv("WORKSPACE_ROOT", "/tmp/workspaces", 1)
+        setenv("REPO_PATH", "/tmp/repo", 1)
+        setenv("WORKFLOW_TEMPLATE_PATH", "/tmp/WORKFLOW.md", 1)
 
         // Act
         let config = try DaemonConfig.fromEnvironment()
@@ -50,6 +62,10 @@ final class DaemonConfigTests: XCTestCase {
         XCTAssertEqual(config.githubRepo, "acme/daemon")
         XCTAssertEqual(config.pollIntervalSeconds, 45)
         XCTAssertEqual(config.inFlightTimeoutSeconds, 900)
+        XCTAssertEqual(config.codexCommand, "/usr/local/bin/codex")
+        XCTAssertEqual(config.workspaceRoot, "/tmp/workspaces")
+        XCTAssertEqual(config.repoPath, "/tmp/repo")
+        XCTAssertEqual(config.workflowTemplatePath, "/tmp/WORKFLOW.md")
     }
 
     func test_fromEnvironment_whenRequiredValuesMissing_throwsError() {

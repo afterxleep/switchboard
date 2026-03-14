@@ -74,6 +74,31 @@ public final class StateStore {
         }
     }
 
+    public func markPending(id: String) throws {
+        try updateEntry(id: id) { entry in
+            entry.status = .pending
+            entry.startedAt = nil
+            entry.updatedAt = Date()
+            entry.sessionId = nil
+            entry.agentPid = nil
+            entry.tokensUsed = nil
+        }
+    }
+
+    public func updateMetadata(
+        id: String,
+        sessionId: String?,
+        agentPid: Int?,
+        tokensUsed: Int?
+    ) throws {
+        try updateEntry(id: id) { entry in
+            entry.sessionId = sessionId
+            entry.agentPid = agentPid
+            entry.tokensUsed = tokensUsed
+            entry.updatedAt = Date()
+        }
+    }
+
     public func isInFlight(id: String) -> Bool {
         guard let entry = try? load()[id] else {
             return false

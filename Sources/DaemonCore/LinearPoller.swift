@@ -43,7 +43,7 @@ public final class LinearPoller: LinearPolling {
                 return .issueCancelled(id: issue.id, identifier: issue.identifier)
             }
 
-            if state.keys.contains(eventId) == false, activeStates.contains(stateName) {
+            if (state[eventId] == nil || state[eventId]?.status == .pending), activeStates.contains(stateName) {
                 return .newIssue(
                     id: issue.id,
                     identifier: issue.identifier,
