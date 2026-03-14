@@ -52,7 +52,7 @@ public final class AgentRunner: AgentRunning {
                     title: turnTitle,
                     onEvent: logEvent,
                     turnTimeoutSeconds: 3600,
-                    stallTimeoutSeconds: 1800
+                    stallTimeoutSeconds: 900
                 )
             } else if let threadId = context.threadId {
                 let resumed = await codexClient.resume(
@@ -62,7 +62,7 @@ public final class AgentRunner: AgentRunning {
                     title: turnTitle,
                     onEvent: logEvent,
                     turnTimeoutSeconds: 3600,
-                    stallTimeoutSeconds: 1800
+                    stallTimeoutSeconds: 900
                 )
                 if resumed {
                     succeeded = true
@@ -74,7 +74,7 @@ public final class AgentRunner: AgentRunning {
                         title: turnTitle,
                         onEvent: logEvent,
                         turnTimeoutSeconds: 3600,
-                        stallTimeoutSeconds: 1800
+                        stallTimeoutSeconds: 900
                     )
                 }
             } else {
@@ -84,7 +84,7 @@ public final class AgentRunner: AgentRunning {
                     title: turnTitle,
                     onEvent: logEvent,
                     turnTimeoutSeconds: 3600,
-                    stallTimeoutSeconds: 1800
+                    stallTimeoutSeconds: 900
                 )
             }
 

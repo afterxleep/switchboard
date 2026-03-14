@@ -451,9 +451,11 @@ public final class DaemonLoop {
                 try stateStore.incrementRetry(id: completedId)
                 let entry = try stateStore.load()[completedId]
                 if let retryCount = entry?.retryCount, retryCount >= config.maxAgentRetries {
-                    if let entry {
-                        try dispatcher.dispatch(fallbackEvent(for: entry, error: result.error))
-                    }
+                    // Reset retry counter and re-queue — never dispatch synthetic fallback events
+                    // (they create duplicate state entries via the old EventDispatcher path)
+                    try stateStore.resetRetry(id: completedId)
+                    try stateStore.markPending(id: completedId)
+                    logger("agent exhausted retries for \(completedId), resetting and re-queuing")
                 } else {
                     try stateStore.markPending(id: completedId)
                 }

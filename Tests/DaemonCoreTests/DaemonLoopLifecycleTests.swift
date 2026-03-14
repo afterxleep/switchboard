@@ -462,31 +462,34 @@ final class DaemonLoopLifecycleTests: XCTestCase {
         XCTAssertTrue(logs.messages.contains(where: { $0.contains("failed to request reviewer for PR #145") }))
     }
 
-    func test_agentFailure_incrementsRetryAndDispatchesAtMaxRetries() async throws {
+    func test_agentFailure_atMaxRetries_resetsAndRequeuesWithoutDispatch() async throws {
+        // Arrange
         let stateStore = makeStore()
         let linearPoller = MockLinearPolling()
         linearPoller.stubbedEvents = [.newIssue(id: "issue-200", identifier: "DB-200", title: "Add X", description: nil)]
-        let githubPoller = MockGitHubPolling()
         let dispatcher = MockEventDispatching()
-        let completionWatcher = MockCompletionWatching()
         let agentRunner = MockAgentRunner()
         agentRunner.stubbedResult = AgentResult(success: false, tokensUsed: 0, error: "boom", threadId: nil, threadPath: nil)
         let loop = makeLoop(
             stateStore: stateStore,
             linearPoller: linearPoller,
-            githubPoller: githubPoller,
+            githubPoller: MockGitHubPolling(),
             dispatcher: dispatcher,
-            completionWatcher: completionWatcher,
+            completionWatcher: MockCompletionWatching(),
             agentRunner: agentRunner,
             linearManager: MockLinearStateManager(),
             maxAgentRetries: 1
         )
 
+        // Act — tick to start agent, wait for it to complete, tick again to process result
         try await loop.tick()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        try await loop.tick()
+        try await Task.sleep(nanoseconds: 200_000_000)
         try await loop.tick()
 
-        XCTAssertFalse(dispatcher.receivedDispatchedEvents.isEmpty)
+        // Assert — no synthetic fallback event dispatched (that would create duplicate state entries)
+        XCTAssertTrue(dispatcher.receivedDispatchedEvents.isEmpty, "no fallback dispatch expected")
     }
 
     func test_runningAgent_blocksDuplicateEvents() async throws {
