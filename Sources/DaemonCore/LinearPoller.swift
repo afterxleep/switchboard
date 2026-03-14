@@ -73,7 +73,7 @@ public final class LinearPoller: LinearPolling {
             query Issues($teamSlug: String!, $assigneeId: ID!) {
               issues(filter: {
                 team: { key: { eq: $teamSlug } }
-                state: { type: { eq: "unstarted" } }
+                state: { type: { in: ["unstarted", "started"] } }
                 assignee: { id: { eq: $assigneeId } }
               }) {
                 nodes {

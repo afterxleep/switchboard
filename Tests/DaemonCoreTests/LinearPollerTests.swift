@@ -165,7 +165,7 @@ final class LinearPollerTests: XCTestCase {
             let query = try XCTUnwrap(bodyObject["query"] as? String)
             let variables = try XCTUnwrap(bodyObject["variables"] as? [String: String])
             XCTAssertTrue(query.contains("assignee: { id: { eq: $assigneeId } }"))
-            XCTAssertTrue(query.contains("state: { type: { eq: \"unstarted\" } }"))
+            XCTAssertTrue(query.contains("state: { type: { in: [\"unstarted\", \"started\"] } }"))
             XCTAssertEqual(variables["teamSlug"], "DB")
             XCTAssertEqual(variables["assigneeId"], "agent-123")
             return Self.makeResponse(body: """
