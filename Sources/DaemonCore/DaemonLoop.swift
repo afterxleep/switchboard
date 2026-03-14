@@ -142,6 +142,17 @@ public final class DaemonLoop {
                 }
             }
         }
+
+        // Self-heal: addressingFeedback entries with no actual issues → advance to CI monitoring
+        for entry in state.values where entry.agentPhase == .addressingFeedback {
+            guard let prNumber = entry.prNumber else { continue }
+            guard runningAgent(for: entry.id) == nil else { continue }
+            let hasThreads = (try? await githubPoller.hasUnresolvedThreads(prNumber: prNumber)) ?? true
+            let hasConflicts = (try? await githubPoller.hasConflicts(prNumber: prNumber)) ?? false
+            guard hasThreads == false, hasConflicts == false else { continue }
+            try stateStore.updatePhase(id: entry.id, phase: .waitingOnCI)
+            logger("self-healed \(entry.id): no threads/conflicts, advancing to waitingOnCI")
+        }
     }
 
     private var stopped: Bool {
