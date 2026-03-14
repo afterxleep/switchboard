@@ -362,6 +362,11 @@ public final class DaemonLoop {
         guard runningAgent(for: entry.id) == nil else {
             return
         }
+        let currentCount = agentLock.withLock { runningAgents.count }
+        guard currentCount < config.maxConcurrentAgents else {
+            logger("concurrency cap reached (\(currentCount)/\(config.maxConcurrentAgents)) — deferring agent for \(entry.id)")
+            return
+        }
         persistPendingThreadNodeIds(for: event, entry: entry)
         startAgent(for: event, entryId: entry.id)
     }

@@ -22,6 +22,7 @@ public struct DaemonConfig {
     public let linearDoneStateId: String
     public let maxAgentRetries: Int
     public let ciFailureThreshold: Int
+    public let maxConcurrentAgents: Int
 
     public init(
         linearApiKey: String,
@@ -44,7 +45,8 @@ public struct DaemonConfig {
         linearInReviewStateId: String = "6f88a8a8-a3d7-4f30-9980-47cebb6a2c91",
         linearDoneStateId: String = "5f2c9f55-0b3d-4a86-83ff-42b84f88dbf5",
         maxAgentRetries: Int = 3,
-        ciFailureThreshold: Int = 2
+        ciFailureThreshold: Int = 2,
+        maxConcurrentAgents: Int = 3
     ) {
         self.linearApiKey = linearApiKey
         self.linearTeamSlug = linearTeamSlug
@@ -67,6 +69,7 @@ public struct DaemonConfig {
         self.linearDoneStateId = linearDoneStateId
         self.maxAgentRetries = maxAgentRetries
         self.ciFailureThreshold = ciFailureThreshold
+        self.maxConcurrentAgents = maxConcurrentAgents
     }
 
     public static func fromEnvironment() throws -> DaemonConfig {
@@ -101,7 +104,8 @@ public struct DaemonConfig {
             linearInReviewStateId: environment["LINEAR_IN_REVIEW_STATE_ID"] ?? "6f88a8a8-a3d7-4f30-9980-47cebb6a2c91",
             linearDoneStateId: environment["LINEAR_DONE_STATE_ID"] ?? "5f2c9f55-0b3d-4a86-83ff-42b84f88dbf5",
             maxAgentRetries: Int(environment["MAX_AGENT_RETRIES"] ?? "") ?? 3,
-            ciFailureThreshold: Int(environment["CI_FAILURE_THRESHOLD"] ?? "") ?? 2
+            ciFailureThreshold: Int(environment["CI_FAILURE_THRESHOLD"] ?? "") ?? 2,
+            maxConcurrentAgents: Int(environment["MAX_CONCURRENT_AGENTS"] ?? "") ?? 3
         )
     }
 }

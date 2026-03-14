@@ -174,6 +174,11 @@ public final class CodexAppServerClient: CodexAppServerRunning {
             let message = try await waitForMessage(using: transport, timeoutSeconds: timeoutSeconds)
             onEvent(Self.describe(message: message))
 
+            // Codex returns a response (id: 1, result: {...}) to initialize — not an "initialized" notification.
+            if message.id == 1 {
+                return
+            }
+            // Also handle older protocol versions that send an "initialized" notification.
             if message.method == "initialized" {
                 return
             }
