@@ -122,9 +122,12 @@ public final class StateStore: StateStoring {
         (try? load().values.first(where: { $0.prNumber == prNumber })) ?? nil
     }
 
-    public func attachPR(id: String, prNumber: Int, threadPath: String?) throws {
+    public func attachPR(id: String, prNumber: Int, title: String?, threadPath: String?) throws {
         try updateEntry(id: id) { entry in
             entry.prNumber = prNumber
+            if let title {
+                entry.prTitle = title
+            }
             if let threadPath {
                 entry.threadPath = threadPath
             }

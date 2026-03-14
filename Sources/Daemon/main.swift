@@ -32,6 +32,7 @@ private func makeConfig() -> DaemonConfig {
                 linearTeamSlug: config.linearTeamSlug,
                 githubToken: config.githubToken,
                 githubRepo: config.githubRepo,
+                githubReviewer: config.githubReviewer,
                 pollIntervalSeconds: intervalOverride,
                 inFlightTimeoutSeconds: config.inFlightTimeoutSeconds,
                 stateFilePath: config.stateFilePath,
@@ -107,6 +108,14 @@ let linearStateManager = LinearStateManager(
     inReviewStateId: config.linearInReviewStateId,
     doneStateId: config.linearDoneStateId
 )
+let prReviewRequester = PRReviewRequester(
+    token: config.githubToken,
+    repo: config.githubRepo
+)
+let prMerger = PRMerger(
+    token: config.githubToken,
+    repo: config.githubRepo
+)
 let agentRunner: AgentRunner?
 if
     let workflowTemplate = try? String(contentsOfFile: workflowTemplatePath, encoding: .utf8),
@@ -143,6 +152,8 @@ let loop = DaemonLoop(
     stateStore: stateStore,
     agentRunner: agentRunner,
     linearStateManager: linearStateManager,
+    prReviewRequester: prReviewRequester,
+    prMerger: prMerger,
     workspaceManager: WorkspaceManager(rootPath: config.workspaceRoot),
     completionWatcher: completionWatcher,
     logger: { message in

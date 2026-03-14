@@ -17,6 +17,7 @@ public struct StateEntry: Codable, Equatable {
     public var agentPid: Int?
     public var tokensUsed: Int?
     public var prNumber: Int?
+    public var prTitle: String?
     public var threadPath: String?
     public var linearIssueId: String?
     public var agentPhase: AgentPhase
@@ -35,6 +36,7 @@ public struct StateEntry: Codable, Equatable {
         agentPid: Int? = nil,
         tokensUsed: Int? = nil,
         prNumber: Int? = nil,
+        prTitle: String? = nil,
         threadPath: String? = nil,
         linearIssueId: String? = nil,
         agentPhase: AgentPhase = .coding,
@@ -52,6 +54,7 @@ public struct StateEntry: Codable, Equatable {
         self.agentPid = agentPid
         self.tokensUsed = tokensUsed
         self.prNumber = prNumber
+        self.prTitle = prTitle
         self.threadPath = threadPath
         self.linearIssueId = linearIssueId
         self.agentPhase = agentPhase

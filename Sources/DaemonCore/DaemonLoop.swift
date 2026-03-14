@@ -9,6 +9,8 @@ public final class DaemonLoop {
     private let completionWatcher: any CompletionWatching
     private let agentRunner: (any AgentRunning)?
     private let linearStateManager: (any LinearStateManaging)?
+    private let prReviewRequester: (any PRReviewRequesting)?
+    private let prMerger: (any PRMerging)?
     private let workspaceManager: any WorkspaceManaging
     private let branchParser: any BranchParsing
     private let logger: (String) -> Void
@@ -27,6 +29,8 @@ public final class DaemonLoop {
         stateStore: any StateStoring,
         agentRunner: (any AgentRunning)? = nil,
         linearStateManager: (any LinearStateManaging)? = nil,
+        prReviewRequester: (any PRReviewRequesting)? = nil,
+        prMerger: (any PRMerging)? = nil,
         workspaceManager: any WorkspaceManaging = WorkspaceManager(),
         branchParser: any BranchParsing = IssueIdentifierBranchParser(),
         completionWatcher: any CompletionWatching = CompletionWatcher(),
@@ -46,6 +50,8 @@ public final class DaemonLoop {
         self.completionWatcher = completionWatcher
         self.agentRunner = agentRunner
         self.linearStateManager = linearStateManager
+        self.prReviewRequester = prReviewRequester
+        self.prMerger = prMerger
         self.workspaceManager = workspaceManager
         self.branchParser = branchParser
         self.logger = logger
@@ -169,12 +175,20 @@ public final class DaemonLoop {
             try? await linearStateManager?.moveToInProgress(issueId: id)
             startAgent(for: event, entryId: "linear:\(identifier)")
 
-        case let .prOpened(pr, branch, _):
+        case let .prOpened(pr, branch, title):
             guard let entry = entryForBranch(branch) else {
                 return
             }
-            try stateStore.attachPR(id: entry.id, prNumber: pr, threadPath: entry.threadPath)
+            try stateStore.attachPR(id: entry.id, prNumber: pr, title: title, threadPath: entry.threadPath)
             try stateStore.updatePhase(id: entry.id, phase: .waitingOnCI)
+            guard config.githubReviewer.isEmpty == false else {
+                return
+            }
+            do {
+                try await prReviewRequester?.requestReview(pr: pr, reviewer: config.githubReviewer)
+            } catch {
+                logger("failed to request reviewer for PR #\(pr): \(error)")
+            }
 
         case let .prMerged(pr, _):
             guard let entry = stateStore.entry(forPR: pr) else {
@@ -204,6 +218,11 @@ public final class DaemonLoop {
                 if let linearIssueId = entry.linearIssueId {
                     try? await linearStateManager?.moveToInReview(issueId: linearIssueId)
                 }
+            }
+            do {
+                try await attemptMergeIfReady(prNumber: pr, stateId: entry.id)
+            } catch {
+                logger("merge readiness check failed for PR #\(pr): \(error)")
             }
 
         case let .ciFailure(pr, _, _):
@@ -245,8 +264,10 @@ public final class DaemonLoop {
                 }
                 return
             }
-            if entry.agentPhase == .waitingOnReview, try await githubPoller.hasConflicts(prNumber: pr) == false {
-                logger("PR approved and ready to merge: #\(pr)")
+            do {
+                try await attemptMergeIfReady(prNumber: pr, stateId: entry.id)
+            } catch {
+                logger("merge readiness check failed for PR #\(pr): \(error)")
             }
 
         case let .issueCancelled(_, identifier):
@@ -338,6 +359,11 @@ public final class DaemonLoop {
                         if let linearIssueId = entry.linearIssueId {
                             try? await linearStateManager?.moveToInReview(issueId: linearIssueId)
                         }
+                        do {
+                            try await attemptMergeIfReady(prNumber: prNumber, stateId: completedId)
+                        } catch {
+                            logger("merge readiness check failed for PR #\(prNumber): \(error)")
+                        }
                     }
                 }
             } else {
@@ -374,6 +400,26 @@ public final class DaemonLoop {
         }
         let state = try? stateStore.load()
         return state?["linear:\(identifier)"]
+    }
+
+    private func attemptMergeIfReady(prNumber: Int, stateId: String) async throws {
+        guard let prMerger else {
+            return
+        }
+
+        guard let entry = try stateStore.load()[stateId] else {
+            return
+        }
+
+        let mergeability = try await prMerger.isMergeable(pr: prNumber)
+        guard mergeability.canMerge else {
+            logger("PR #\(prNumber) not mergeable yet: \(mergeability)")
+            return
+        }
+
+        let commitMessage = "\(entry.messageIdentifier): \(entry.prTitle ?? "Update PR #\(prNumber)")"
+        try await prMerger.merge(pr: prNumber, commitMessage: commitMessage)
+        logger("merge requested for PR #\(prNumber)")
     }
 
     private func cancelAllAgents() {

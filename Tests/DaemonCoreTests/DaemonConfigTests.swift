@@ -7,6 +7,7 @@ final class DaemonConfigTests: XCTestCase {
         unsetenv("LINEAR_TEAM_SLUG")
         unsetenv("GITHUB_TOKEN")
         unsetenv("GITHUB_REPO")
+        unsetenv("GITHUB_REVIEWER")
         unsetenv("POLL_INTERVAL_SECONDS")
         unsetenv("INFLIGHT_TIMEOUT_SECONDS")
         unsetenv("CODEX_COMMAND")
@@ -29,6 +30,7 @@ final class DaemonConfigTests: XCTestCase {
         XCTAssertEqual(config.linearTeamSlug, "DB")
         XCTAssertEqual(config.githubToken, "github-token")
         XCTAssertEqual(config.githubRepo, "afterxleep/flowdeck")
+        XCTAssertEqual(config.githubReviewer, "")
         XCTAssertEqual(config.pollIntervalSeconds, 30)
         XCTAssertEqual(config.inFlightTimeoutSeconds, 1800)
         XCTAssertEqual(
@@ -47,6 +49,7 @@ final class DaemonConfigTests: XCTestCase {
         setenv("LINEAR_TEAM_SLUG", "platform", 1)
         setenv("GITHUB_TOKEN", "github-token", 1)
         setenv("GITHUB_REPO", "acme/daemon", 1)
+        setenv("GITHUB_REVIEWER", "kai", 1)
         setenv("POLL_INTERVAL_SECONDS", "45", 1)
         setenv("INFLIGHT_TIMEOUT_SECONDS", "900", 1)
         setenv("CODEX_COMMAND", "/usr/local/bin/codex", 1)
@@ -60,6 +63,7 @@ final class DaemonConfigTests: XCTestCase {
         // Assert
         XCTAssertEqual(config.linearTeamSlug, "platform")
         XCTAssertEqual(config.githubRepo, "acme/daemon")
+        XCTAssertEqual(config.githubReviewer, "kai")
         XCTAssertEqual(config.pollIntervalSeconds, 45)
         XCTAssertEqual(config.inFlightTimeoutSeconds, 900)
         XCTAssertEqual(config.codexCommand, "/usr/local/bin/codex")

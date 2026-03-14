@@ -13,9 +13,10 @@ final class StateStoreLifecycleTests: XCTestCase {
         let entry = StateEntry(id: "linear:DB-196", status: .pending, eventType: "new_issue", details: "DB-196: Add lifecycle", startedAt: nil, updatedAt: Date())
         try store.save([entry.id: entry])
 
-        try store.attachPR(id: entry.id, prNumber: 145, threadPath: "/tmp/thread.jsonl")
+        try store.attachPR(id: entry.id, prNumber: 145, title: "Add lifecycle", threadPath: "/tmp/thread.jsonl")
 
         XCTAssertEqual(store.entry(forPR: 145)?.threadPath, "/tmp/thread.jsonl")
+        XCTAssertEqual(store.entry(forPR: 145)?.prTitle, "Add lifecycle")
     }
 
     func test_updatePhase_preservesOtherFields() throws {

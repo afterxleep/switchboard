@@ -5,6 +5,7 @@ public struct DaemonConfig {
     public let linearTeamSlug: String
     public let githubToken: String
     public let githubRepo: String
+    public let githubReviewer: String
     public let pollIntervalSeconds: TimeInterval
     public let inFlightTimeoutSeconds: TimeInterval
     public let stateFilePath: String
@@ -26,6 +27,7 @@ public struct DaemonConfig {
         linearTeamSlug: String,
         githubToken: String,
         githubRepo: String,
+        githubReviewer: String = "",
         pollIntervalSeconds: TimeInterval,
         inFlightTimeoutSeconds: TimeInterval,
         stateFilePath: String,
@@ -46,6 +48,7 @@ public struct DaemonConfig {
         self.linearTeamSlug = linearTeamSlug
         self.githubToken = githubToken
         self.githubRepo = githubRepo
+        self.githubReviewer = githubReviewer
         self.pollIntervalSeconds = pollIntervalSeconds
         self.inFlightTimeoutSeconds = inFlightTimeoutSeconds
         self.stateFilePath = stateFilePath
@@ -79,6 +82,7 @@ public struct DaemonConfig {
             linearTeamSlug: environment["LINEAR_TEAM_SLUG"] ?? "DB",
             githubToken: githubToken,
             githubRepo: environment["GITHUB_REPO"] ?? "afterxleep/flowdeck",
+            githubReviewer: environment["GITHUB_REVIEWER"] ?? "",
             pollIntervalSeconds: TimeInterval(environment["POLL_INTERVAL_SECONDS"] ?? "") ?? 30,
             inFlightTimeoutSeconds: TimeInterval(environment["INFLIGHT_TIMEOUT_SECONDS"] ?? "") ?? 1800,
             stateFilePath: "~/.flowdeck-daemon/state.json",
