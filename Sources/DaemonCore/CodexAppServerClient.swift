@@ -44,7 +44,7 @@ public final class CodexAppServerClient: CodexAppServerRunning {
                 "method": "thread/start",
                 "params": [
                     "approvalPolicy": "never",
-                    "sandbox": "none",
+                    "sandbox": "danger-full-access",
                     "cwd": workspace,
                 ],
             ])
@@ -141,7 +141,7 @@ public final class CodexAppServerClient: CodexAppServerRunning {
                     "title": title,
                     "approvalPolicy": "never",
                     "sandboxPolicy": [
-                        "type": "none",
+                        "type": "dangerFullAccess",
                     ],
                 ],
             ])
