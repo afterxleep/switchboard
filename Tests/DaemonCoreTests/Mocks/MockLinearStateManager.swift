@@ -3,6 +3,7 @@ import Foundation
 
 final class MockLinearStateManager: LinearStateManaging {
     var inProgressIssueIds: [String] = []
+    var movedToInProgressIds: [String] { inProgressIssueIds }
     var inReviewIssueIds: [String] = []
     var doneIssueIds: [String] = []
 

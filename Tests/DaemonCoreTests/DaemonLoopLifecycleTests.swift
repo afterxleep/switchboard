@@ -642,6 +642,7 @@ final class DaemonLoopLifecycleTests: XCTestCase {
         reviewThreadResolver: MockReviewThreadResolver? = nil,
         workspaceManager: MockWorkspaceManager = MockWorkspaceManager(),
         maxAgentRetries: Int = 3,
+        maxConcurrentAgents: Int = 10,
         githubReviewer: String = "",
         logger: @escaping (String) -> Void = { _ in }
     ) -> DaemonLoop {
@@ -660,7 +661,8 @@ final class DaemonLoopLifecycleTests: XCTestCase {
                 workspaceRoot: "~/.flowdeck-daemon/workspaces",
                 repoPath: "~/Developer/flowdeck",
                 workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md",
-                maxAgentRetries: maxAgentRetries
+                maxAgentRetries: maxAgentRetries,
+                maxConcurrentAgents: maxConcurrentAgents
             ),
             linearPoller: linearPoller,
             githubPoller: githubPoller,
@@ -715,5 +717,159 @@ private final class LogSink {
 
     func log(message: String) {
         messages.append(message)
+    }
+}
+
+extension DaemonLoopLifecycleTests {
+    // MARK: - linkedPRNumber skips findOpenPR
+
+    func test_newIssue_whenLinkedPRNumber_attachesDirectlyWithoutSearchingGitHub() async throws {
+        // Arrange
+        let store = makeStore()
+        let runner = MockAgentRunner()
+        let githubPoller = MockGitHubPolling()
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: runner, linearManager: MockLinearStateManager())
+
+        // Act
+        let event = DaemonEvent.newIssue(id: "issue-300", identifier: "DB-300", title: "Fix", description: nil, linkedPRNumber: 77)
+        try await loop.routeForTesting(event)
+
+        // Assert
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["linear:DB-300"])
+        XCTAssertEqual(entry.prNumber, 77)
+        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI)
+        XCTAssertTrue(runner.receivedEvents.isEmpty, "should not spawn Codex for existing PR")
+        XCTAssertTrue(githubPoller.receivedFindOpenPRIdentifiers.isEmpty, "should not call findOpenPR when linkedPRNumber provided")
+    }
+
+    // MARK: - PR-attach does not move Linear state
+
+    func test_newIssue_whenExistingPRFound_doesNotMoveLinearState() async throws {
+        // Arrange
+        let store = makeStore()
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedExistingPR = (prNumber: 88, branch: "kai/db-301-fix", title: "Fix")
+        let linearManager = MockLinearStateManager()
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: linearManager)
+
+        // Act
+        let event = DaemonEvent.newIssue(id: "issue-301", identifier: "DB-301", title: "Fix", description: nil)
+        try await loop.routeForTesting(event)
+
+        // Assert
+        XCTAssertEqual(linearManager.movedToInProgressIds.count, 0, "should not change Linear state when attaching existing PR")
+    }
+
+    // MARK: - Standalone PR tracking
+
+    func test_prOpened_whenNoMatchingLinearEntry_createsStandaloneEntry() async throws {
+        // Arrange
+        let store = makeStore()
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
+
+        // Act
+        try await loop.routeForTesting(DaemonEvent.prOpened(pr: 55, branch: "feature/no-issue", title: "Standalone PR"))
+
+        // Assert
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["gh:pr:55"])
+        XCTAssertEqual(entry.prNumber, 55)
+        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI)
+        XCTAssertNil(entry.linearIssueId)
+    }
+
+    // MARK: - reconcile self-heals addressingFeedback
+
+    func test_reconcile_whenAddressingFeedbackHasNoThreadsAndNoConflicts_advancesToWaitingOnCI() async throws {
+        // Arrange
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-400",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-400",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 99,
+            linearIssueId: "issue-400",
+            agentPhase: .addressingFeedback
+        ))
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedHasUnresolvedThreads = false
+        githubPoller.stubbedHasConflicts = false
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
+
+        // Act
+        try await loop.reconcile()
+
+        // Assert
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["linear:DB-400"])
+        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI)
+    }
+
+    func test_reconcile_whenAddressingFeedbackHasUnresolvedThreads_keepsPhase() async throws {
+        // Arrange
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-401",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-401",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 100,
+            linearIssueId: "issue-401",
+            agentPhase: .addressingFeedback
+        ))
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedHasUnresolvedThreads = true
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
+
+        // Act
+        try await loop.reconcile()
+
+        // Assert
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["linear:DB-401"])
+        XCTAssertEqual(entry.agentPhase, AgentPhase.addressingFeedback)
+    }
+
+    // MARK: - Concurrency cap
+
+    func test_startAgentIfIdle_whenConcurrencyCapReached_defersAgent() async throws {
+        // Arrange — seed two entries, cap at 1
+        let store = makeStore()
+        for id in ["linear:DB-501", "linear:DB-502"] {
+            try store.upsert(StateEntry(
+                id: id,
+                status: .pending,
+                eventType: "new_issue",
+                details: id,
+                startedAt: nil,
+                updatedAt: Date(),
+                prNumber: id == "linear:DB-501" ? 101 : 102,
+                linearIssueId: id,
+                agentPhase: .addressingFeedback
+            ))
+        }
+        let runner = MockAgentRunner()
+        let loop = makeLoop(
+            stateStore: store,
+            githubPoller: MockGitHubPolling(),
+            agentRunner: runner,
+            linearManager: MockLinearStateManager(),
+            maxAgentRetries: 3,
+            maxConcurrentAgents: 1
+        )
+
+        // Act — route two feedback events
+        try await loop.routeForTesting(DaemonEvent.reviewComment(pr: 101, body: "Fix this", author: "afterxleep"))
+        try await loop.routeForTesting(DaemonEvent.reviewComment(pr: 102, body: "Fix that", author: "afterxleep"))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // Assert — only 1 agent started despite 2 events
+        XCTAssertEqual(runner.receivedEvents.count, 1, "concurrency cap should defer the second agent")
     }
 }

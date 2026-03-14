@@ -224,4 +224,55 @@ final class LinearPollerTests: XCTestCase {
         )!
         return (response, Data(body.utf8))
     }
+
+    // MARK: - activeStates includes "in review"
+
+    func test_linearPoller_whenIssueIsInReview_emitsNewIssue() async throws {
+        // Arrange
+        let poller = LinearPoller(apiKey: "tok", teamSlug: "DB", assigneeId: "", urlSession: session)
+        MockURLProtocol.requestHandler = { _ in
+            Self.makeResponse(body: """
+            {"data":{"issues":{"nodes":[
+              {"id":"id-1","identifier":"DB-10","title":"T","description":null,"state":{"name":"In Review"},"attachments":{"nodes":[]}}
+            ]}}}
+            """)
+        }
+
+        // Act
+        let events = try await poller.poll(state: [:])
+
+        // Assert
+        XCTAssertEqual(events.count, 1)
+        if case let .newIssue(_, identifier, _, _, _) = events[0] {
+            XCTAssertEqual(identifier, "DB-10")
+        } else {
+            XCTFail("Expected newIssue")
+        }
+    }
+
+    // MARK: - Attachment URL parsing
+
+    func test_linearPoller_whenAttachmentContainsPRUrl_emitsLinkedPRNumber() async throws {
+        // Arrange
+        let poller = LinearPoller(apiKey: "tok", teamSlug: "DB", assigneeId: "", urlSession: session)
+        MockURLProtocol.requestHandler = { _ in
+            Self.makeResponse(body: """
+            {"data":{"issues":{"nodes":[
+              {"id":"id-1","identifier":"DB-20","title":"T","description":null,"state":{"name":"Todo"},
+               "attachments":{"nodes":[{"url":"https://github.com/owner/repo/pull/99"}]}}
+            ]}}}
+            """)
+        }
+
+        // Act
+        let events = try await poller.poll(state: [:])
+
+        // Assert
+        XCTAssertEqual(events.count, 1)
+        if case let .newIssue(_, _, _, _, linkedPRNumber) = events[0] {
+            XCTAssertEqual(linkedPRNumber, 99)
+        } else {
+            XCTFail("Expected newIssue with linkedPRNumber")
+        }
+    }
 }
