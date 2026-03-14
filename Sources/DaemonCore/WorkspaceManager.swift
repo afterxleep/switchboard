@@ -4,15 +4,18 @@ public final class WorkspaceManager: WorkspaceManaging {
     private let rootURL: URL
     private let gitCommand: String
     private let fileManager: FileManager
+    private let commandRunner: any CommandRunning
 
     public init(
         rootPath: String = "~/.flowdeck-daemon/workspaces",
         gitCommand: String = "/usr/bin/git",
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        commandRunner: any CommandRunning = ProcessCommandRunner()
     ) {
         self.rootURL = URL(fileURLWithPath: NSString(string: rootPath).expandingTildeInPath, isDirectory: true)
         self.gitCommand = gitCommand
         self.fileManager = fileManager
+        self.commandRunner = commandRunner
     }
 
     public func workspace(for event: DaemonEvent, repoPath: String) throws -> String {
@@ -38,23 +41,17 @@ public final class WorkspaceManager: WorkspaceManaging {
     }
 
     private func runGitWorktreeAdd(workspaceURL: URL, repoPath: String) throws {
-        let process = Process()
-        let outputPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: gitCommand)
-        process.currentDirectoryURL = URL(fileURLWithPath: NSString(string: repoPath).expandingTildeInPath, isDirectory: true)
-        process.arguments = ["worktree", "add", workspaceURL.path]
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
-        try process.run()
-        process.waitUntilExit()
+        let result = try commandRunner.run(
+            command: gitCommand,
+            arguments: ["worktree", "add", workspaceURL.path],
+            currentDirectoryPath: repoPath
+        )
 
-        guard process.terminationStatus == 0 else {
-            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown git error"
+        guard result.terminationStatus == 0 else {
             throw WorkspaceManagerError.gitWorktreeAddFailed(
-                repoPath: process.currentDirectoryURL?.path ?? repoPath,
+                repoPath: NSString(string: repoPath).expandingTildeInPath,
                 workspacePath: workspaceURL.path,
-                details: output
+                details: result.combinedOutput.isEmpty ? "unknown git error" : result.combinedOutput
             )
         }
     }

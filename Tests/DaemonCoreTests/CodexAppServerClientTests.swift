@@ -66,6 +66,39 @@ final class CodexAppServerClientTests: XCTestCase {
         XCTAssertFalse(succeeded)
         XCTAssertEqual(client.lastError, "turn/failed")
     }
+
+    func test_resume_whenTurnCompletes_usesExistingThreadIdentifier() async {
+        // Arrange
+        let transport = MockTransport(
+            messages: [
+                ["id": 1, "result": [:]],
+                ["method": "initialized"],
+                ["id": 2, "result": ["thread": ["id": "thread-9", "path": "/tmp/thread-9.jsonl"]]],
+                ["method": "turn/completed", "params": ["usage": ["input_tokens": 10, "output_tokens": 5]]],
+            ]
+        )
+        let client = CodexAppServerClient(codexPath: "/opt/homebrew/bin/codex") {
+            transport
+        }
+
+        // Act
+        let succeeded = await client.resume(
+            workspace: "/tmp/workspace",
+            threadId: "thread-9",
+            prompt: "Resume the issue",
+            title: "DB-196: Expand daemon",
+            onEvent: { _ in },
+            turnTimeoutSeconds: 60,
+            stallTimeoutSeconds: 60
+        )
+
+        // Assert
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(client.lastThreadId, "thread-9")
+        XCTAssertEqual(client.lastThreadPath, "/tmp/thread-9.jsonl")
+        XCTAssertEqual(client.lastTokensUsed, 15)
+        XCTAssertEqual(transport.sentPayloads[1]["method"] as? String, "thread/resume")
+    }
 }
 
 private final class MockTransport: CodexAppServerClient.Transporting {

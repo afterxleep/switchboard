@@ -121,6 +121,27 @@ final class AgentRunnerLifecycleTests: XCTestCase {
         XCTAssertTrue(codexClient.receivedPrompts[1].contains("Recovery Context"))
     }
 
+    func test_run_whenStateStoreIsMissing_returnsFailureWithContextualError() async {
+        // Arrange
+        let runner = AgentRunner(
+            repoPath: "~/Developer/flowdeck",
+            workflowTemplate: "# Task\n{{ISSUE_IDENTIFIER}}: {{ISSUE_TITLE}}\n\n{{ISSUE_DESCRIPTION}}",
+            workspaceManager: MockWorkspaceManager(),
+            codexClient: MockCodexAppServerClient(),
+            stateStore: nil
+        )
+
+        // Act
+        let result = await runner.run(
+            event: .newIssue(id: "issue-1", identifier: "DB-196", title: "Expand daemon", description: nil),
+            config: makeConfig()
+        )
+
+        // Assert
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.error, String(describing: AgentRunnerError.missingStateStore))
+    }
+
     private func makeRunner(
         stateStore: StateStore,
         workspaceManager: MockWorkspaceManager,

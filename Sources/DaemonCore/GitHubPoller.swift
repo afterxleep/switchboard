@@ -184,9 +184,17 @@ public final class GitHubPoller: GitHubPolling {
 
     private func graphQLVariables(prNumber: Int) -> [String: Any] {
         let components = repo.split(separator: "/", maxSplits: 1).map(String.init)
+        guard components.count == 2 else {
+            return [
+                "owner": "",
+                "repo": "",
+                "number": prNumber,
+            ]
+        }
+
         return [
-            "owner": components.first ?? "",
-            "repo": components.count > 1 ? components[1] : "",
+            "owner": components[0],
+            "repo": components[1],
             "number": prNumber,
         ]
     }
@@ -224,22 +232,63 @@ public final class GitHubPoller: GitHubPolling {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        let (data, _) = try await urlSession.data(for: request)
-        return try decoder.decode(T.self, from: data)
+        let (data, _) = try await response(for: request, path: path)
+
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw GitHubPollerError.decodingFailed(path: path, details: String(describing: error))
+        }
     }
 
     private func postGraphQL<T: Decodable>(query: String, variables: [String: Any]) async throws -> T {
+        let path = "/graphql"
+        guard repo.split(separator: "/", maxSplits: 1).count == 2 else {
+            throw GitHubPollerError.invalidRepository(repository: repo)
+        }
+
         var request = URLRequest(url: URL(string: "https://api.github.com/graphql")!)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "query": query,
-            "variables": variables,
-        ])
-        let (data, _) = try await urlSession.data(for: request)
-        return try decoder.decode(T.self, from: data)
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "query": query,
+                "variables": variables,
+            ])
+        } catch {
+            throw GitHubPollerError.graphQLEncodingFailed(
+                repository: repo,
+                details: String(describing: error)
+            )
+        }
+
+        let (data, _) = try await response(for: request, path: path)
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw GitHubPollerError.decodingFailed(path: path, details: String(describing: error))
+        }
+    }
+
+    private func response(for request: URLRequest, path: String) async throws -> (Data, URLResponse) {
+        do {
+            let (data, response) = try await urlSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw GitHubPollerError.invalidResponse(path: path)
+            }
+
+            guard (200 ..< 300).contains(httpResponse.statusCode) else {
+                throw GitHubPollerError.httpError(path: path, statusCode: httpResponse.statusCode)
+            }
+
+            return (data, response)
+        } catch let error as GitHubPollerError {
+            throw error
+        } catch {
+            throw GitHubPollerError.requestFailed(path: path, details: String(describing: error))
+        }
     }
 
     private func lastPolledDate(for prNumber: Int, state: [String: StateEntry]) -> Date? {
@@ -252,6 +301,32 @@ public final class GitHubPoller: GitHubPolling {
         }
 
         return entry.status != .inFlight && entry.status != .done
+    }
+}
+
+public enum GitHubPollerError: LocalizedError, Equatable {
+    case invalidRepository(repository: String)
+    case graphQLEncodingFailed(repository: String, details: String)
+    case requestFailed(path: String, details: String)
+    case invalidResponse(path: String)
+    case httpError(path: String, statusCode: Int)
+    case decodingFailed(path: String, details: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case let .invalidRepository(repository):
+            return "GitHub repository must be in owner/name format: \(repository)"
+        case let .graphQLEncodingFailed(repository, details):
+            return "GitHub GraphQL request encoding failed for repository \(repository): \(details)"
+        case let .requestFailed(path, details):
+            return "GitHub request failed for \(path): \(details)"
+        case let .invalidResponse(path):
+            return "GitHub request returned a non-HTTP response for \(path)"
+        case let .httpError(path, statusCode):
+            return "GitHub request failed for \(path) with status \(statusCode)"
+        case let .decodingFailed(path, details):
+            return "GitHub response decoding failed for \(path): \(details)"
+        }
     }
 }
 

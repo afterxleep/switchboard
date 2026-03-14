@@ -65,12 +65,41 @@ public final class LinearStateManager: LinearStateManaging {
             ],
         ])
 
-        let (data, response) = try await urlSession.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, (200 ..< 300).contains(httpResponse.statusCode) else {
-            throw LinearStateManagerError.httpError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await urlSession.data(for: request)
+        } catch {
+            throw LinearStateManagerError.requestFailed(
+                issueId: issueId,
+                stateId: stateId,
+                details: String(describing: error)
+            )
         }
 
-        let payload = try JSONDecoder().decode(LinearIssueUpdateResponse.self, from: data)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw LinearStateManagerError.invalidResponse(issueId: issueId, stateId: stateId)
+        }
+
+        guard (200 ..< 300).contains(httpResponse.statusCode) else {
+            throw LinearStateManagerError.httpError(
+                issueId: issueId,
+                stateId: stateId,
+                statusCode: httpResponse.statusCode
+            )
+        }
+
+        let payload: LinearIssueUpdateResponse
+        do {
+            payload = try JSONDecoder().decode(LinearIssueUpdateResponse.self, from: data)
+        } catch {
+            throw LinearStateManagerError.decodingFailed(
+                issueId: issueId,
+                stateId: stateId,
+                details: String(describing: error)
+            )
+        }
+
         guard payload.data.issueUpdate.success else {
             throw LinearStateManagerError.updateFailed(issueId: issueId, stateId: stateId)
         }
@@ -78,13 +107,22 @@ public final class LinearStateManager: LinearStateManaging {
 }
 
 public enum LinearStateManagerError: LocalizedError, Equatable {
-    case httpError(statusCode: Int)
+    case requestFailed(issueId: String, stateId: String, details: String)
+    case invalidResponse(issueId: String, stateId: String)
+    case httpError(issueId: String, stateId: String, statusCode: Int)
+    case decodingFailed(issueId: String, stateId: String, details: String)
     case updateFailed(issueId: String, stateId: String)
 
     public var errorDescription: String? {
         switch self {
-        case let .httpError(statusCode):
-            return "Linear API request failed with status \(statusCode)"
+        case let .requestFailed(issueId, stateId, details):
+            return "Linear issue update request failed for issue \(issueId) to state \(stateId): \(details)"
+        case let .invalidResponse(issueId, stateId):
+            return "Linear issue update returned a non-HTTP response for issue \(issueId) to state \(stateId)"
+        case let .httpError(issueId, stateId, statusCode):
+            return "Linear issue update failed for issue \(issueId) to state \(stateId) with status \(statusCode)"
+        case let .decodingFailed(issueId, stateId, details):
+            return "Linear issue update response could not be decoded for issue \(issueId) to state \(stateId): \(details)"
         case let .updateFailed(issueId, stateId):
             return "Linear issue update failed for issue \(issueId) to state \(stateId)"
         }

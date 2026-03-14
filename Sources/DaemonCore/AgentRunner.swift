@@ -8,7 +8,7 @@ public final class AgentRunner: AgentRunning {
     private let reviewTemplate: String
     private let ciTemplate: String
     private let conflictTemplate: String
-    private let stateStore: StateStore?
+    private let stateStore: (any StateStoring)?
     private let logger: (String) -> Void
 
     public init(
@@ -19,7 +19,7 @@ public final class AgentRunner: AgentRunning {
         conflictTemplate: String = "",
         workspaceManager: any WorkspaceManaging = WorkspaceManager(),
         codexClient: any CodexAppServerRunning = CodexAppServerClient(),
-        stateStore: StateStore? = nil,
+        stateStore: (any StateStoring)? = nil,
         logger: @escaping (String) -> Void = { _ in }
     ) {
         self.repoPath = repoPath
@@ -36,6 +36,7 @@ public final class AgentRunner: AgentRunning {
     public func run(event: DaemonEvent, config: DaemonConfig) async -> AgentResult {
         do {
             let workspace = try workspaceManager.workspace(for: event, repoPath: repoPath)
+            _ = config
             let context = try resolveContext(for: event)
             let turnTitle = "\(context.identifier): \(context.title)"
             let prompt = renderPrompt(event: event, context: context)

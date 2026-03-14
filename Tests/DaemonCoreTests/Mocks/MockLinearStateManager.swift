@@ -17,4 +17,10 @@ final class MockLinearStateManager: LinearStateManaging {
     func moveToDone(issueId: String) async throws {
         doneIssueIds.append(issueId)
     }
+
+    func reset() {
+        inProgressIssueIds.removeAll()
+        inReviewIssueIds.removeAll()
+        doneIssueIds.removeAll()
+    }
 }

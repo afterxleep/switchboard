@@ -11,4 +11,10 @@ final class MockAgentRunner: AgentRunning {
         receivedConfigs.append(config)
         return stubbedResult
     }
+
+    func reset() {
+        receivedEvents.removeAll()
+        receivedConfigs.removeAll()
+        stubbedResult = AgentResult(success: true, tokensUsed: 0, error: nil, threadId: nil, threadPath: nil)
+    }
 }

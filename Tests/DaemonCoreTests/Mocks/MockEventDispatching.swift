@@ -17,4 +17,10 @@ final class MockEventDispatching: EventDispatching {
     func markDone(id: String) throws {
         receivedMarkedDoneIds.append(id)
     }
+
+    func reset() {
+        receivedDispatchedEvents.removeAll()
+        receivedRetryTimeouts.removeAll()
+        receivedMarkedDoneIds.removeAll()
+    }
 }

@@ -5,11 +5,12 @@ public final class DaemonLoop {
     private let linearPoller: any LinearPolling
     private let githubPoller: any GitHubPolling
     private let dispatcher: any EventDispatching
-    private let stateStore: StateStore
+    private let stateStore: any StateStoring
     private let completionWatcher: any CompletionWatching
     private let agentRunner: (any AgentRunning)?
     private let linearStateManager: (any LinearStateManaging)?
     private let workspaceManager: any WorkspaceManaging
+    private let branchParser: any BranchParsing
     private let logger: (String) -> Void
     private let sleep: (TimeInterval) async -> Void
     private let stopLock: NSLock
@@ -23,10 +24,11 @@ public final class DaemonLoop {
         linearPoller: any LinearPolling,
         githubPoller: any GitHubPolling,
         dispatcher: any EventDispatching,
-        stateStore: StateStore,
+        stateStore: any StateStoring,
         agentRunner: (any AgentRunning)? = nil,
         linearStateManager: (any LinearStateManaging)? = nil,
         workspaceManager: any WorkspaceManaging = WorkspaceManager(),
+        branchParser: any BranchParsing = IssueIdentifierBranchParser(),
         completionWatcher: any CompletionWatching = CompletionWatcher(),
         logger: @escaping (String) -> Void = { message in
             fputs("\(message)\n", stderr)
@@ -45,6 +47,7 @@ public final class DaemonLoop {
         self.agentRunner = agentRunner
         self.linearStateManager = linearStateManager
         self.workspaceManager = workspaceManager
+        self.branchParser = branchParser
         self.logger = logger
         self.sleep = sleep
         self.stopLock = NSLock()
@@ -366,23 +369,11 @@ public final class DaemonLoop {
     }
 
     private func entryForBranch(_ branch: String) -> StateEntry? {
-        guard let identifier = Self.extractIssueIdentifier(from: branch) else {
+        guard let identifier = branchParser.issueIdentifier(from: branch) else {
             return nil
         }
         let state = try? stateStore.load()
         return state?["linear:\(identifier)"]
-    }
-
-    static func extractIssueIdentifier(from branch: String) -> String? {
-        let pattern = "(?i)db-\\d+"
-        guard
-            let regex = try? NSRegularExpression(pattern: pattern),
-            let match = regex.firstMatch(in: branch, range: NSRange(branch.startIndex..., in: branch)),
-            let range = Range(match.range, in: branch)
-        else {
-            return nil
-        }
-        return branch[range].uppercased()
     }
 
     private func cancelAllAgents() {

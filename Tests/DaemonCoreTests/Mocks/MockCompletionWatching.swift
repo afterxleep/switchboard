@@ -9,4 +9,9 @@ final class MockCompletionWatching: CompletionWatching {
         checkCallCount += 1
         try stubbedAction?(dispatcher)
     }
+
+    func reset() {
+        checkCallCount = 0
+        stubbedAction = nil
+    }
 }

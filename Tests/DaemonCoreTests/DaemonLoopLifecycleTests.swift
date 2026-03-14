@@ -141,6 +141,58 @@ final class DaemonLoopLifecycleTests: XCTestCase {
         XCTAssertEqual(workspaceManager.receivedCleanupIds, [["linear:DB-200"]])
     }
 
+    func test_reconcile_whenWaitingOnReviewHasUnresolvedThreads_movesIssueBackToInProgress() async throws {
+        // Arrange
+        let stateStore = makeStore()
+        try seedTrackedEntry(store: stateStore, phase: .waitingOnReview)
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedHasUnresolvedThreads = true
+        let linearManager = MockLinearStateManager()
+        let loop = makeLoop(
+            stateStore: stateStore,
+            githubPoller: githubPoller,
+            agentRunner: MockAgentRunner(),
+            linearManager: linearManager
+        )
+
+        // Act
+        try await loop.reconcile()
+
+        // Assert
+        XCTAssertEqual(try stateStore.load()["linear:DB-200"]?.agentPhase, .addressingFeedback)
+        XCTAssertEqual(linearManager.inProgressIssueIds, ["issue-200"])
+        XCTAssertEqual(githubPoller.receivedUnresolvedThreadPRNumbers, [145])
+    }
+
+    func test_routeForTesting_whenPullRequestOpensWithoutMatchingBranch_keepsStateUnchanged() async throws {
+        // Arrange
+        let stateStore = makeStore()
+        try stateStore.upsert(
+            StateEntry(
+                id: "linear:DB-200",
+                status: .pending,
+                eventType: "new_issue",
+                details: "DB-200: Add X",
+                startedAt: nil,
+                updatedAt: Date(),
+                linearIssueId: "issue-200",
+                agentPhase: .coding
+            )
+        )
+        let loop = makeLoop(
+            stateStore: stateStore,
+            githubPoller: MockGitHubPolling(),
+            agentRunner: MockAgentRunner(),
+            linearManager: MockLinearStateManager()
+        )
+
+        // Act
+        try await loop.routeForTesting(.prOpened(pr: 145, branch: "kai/no-identifier", title: "Add X"))
+
+        // Assert
+        XCTAssertNil(try stateStore.load()["linear:DB-200"]?.prNumber)
+    }
+
     private func makeLoop(
         stateStore: StateStore,
         linearPoller: MockLinearPolling = MockLinearPolling(),

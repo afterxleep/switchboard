@@ -53,13 +53,34 @@ final class LinearStateManagerTests: XCTestCase {
     }
 
     func test_moveToDone_whenHTTPError_throws() async {
+        // Arrange
         let manager = makeManager()
         MockURLProtocol.requestHandler = { _ in
             Self.response(body: "{}", statusCode: 500)
         }
 
+        // Act / Assert
         await XCTAssertThrowsErrorAsync(try await manager.moveToDone(issueId: "issue-1")) { error in
-            XCTAssertEqual(error as? LinearStateManagerError, .httpError(statusCode: 500))
+            XCTAssertEqual(
+                error as? LinearStateManagerError,
+                .httpError(issueId: "issue-1", stateId: "done", statusCode: 500)
+            )
+        }
+    }
+
+    func test_moveToDone_whenLinearReturnsUnsuccessfulPayload_throwsContextualError() async {
+        // Arrange
+        let manager = makeManager()
+        MockURLProtocol.requestHandler = { _ in
+            Self.response(body: #"{"data":{"issueUpdate":{"success":false}}}"#)
+        }
+
+        // Act / Assert
+        await XCTAssertThrowsErrorAsync(try await manager.moveToDone(issueId: "issue-1")) { error in
+            XCTAssertEqual(
+                error as? LinearStateManagerError,
+                .updateFailed(issueId: "issue-1", stateId: "done")
+            )
         }
     }
 

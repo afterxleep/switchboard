@@ -1,12 +1,18 @@
 import Foundation
 
 public final class EventDispatcher: EventDispatching {
-    private let stateStore: StateStore
+    private let stateStore: any StateStoring
     private let openClawCommand: String
+    private let commandRunner: any CommandRunning
 
-    public init(stateStore: StateStore, openClawCommand: String = "/opt/homebrew/bin/openclaw") {
+    public init(
+        stateStore: any StateStoring,
+        openClawCommand: String = "/opt/homebrew/bin/openclaw",
+        commandRunner: any CommandRunning = ProcessCommandRunner()
+    ) {
         self.stateStore = stateStore
         self.openClawCommand = openClawCommand
+        self.commandRunner = commandRunner
     }
 
     public func dispatch(_ event: DaemonEvent) throws {
@@ -42,27 +48,16 @@ public final class EventDispatcher: EventDispatching {
 
     private func dispatch(entry: StateEntry, identifier: String) throws {
         let message = "[\(identifier)] \(entry.eventType): \(entry.details)"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: openClawCommand)
-        process.arguments = ["system", "event", "--text", message, "--mode", "now"]
-        // Suppress openclaw's stdout/stderr so it doesn't pollute daemon logs
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        let result = try commandRunner.run(
+            command: openClawCommand,
+            arguments: ["system", "event", "--text", message, "--mode", "now"],
+            currentDirectoryPath: nil
+        )
 
-        let semaphore = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in semaphore.signal() }
-        try process.run()
-
-        // Wait up to 10 seconds; kill if it hangs
-        if semaphore.wait(timeout: .now() + 10) == .timedOut {
-            process.terminate()
-            throw EventDispatcherError.commandTimedOut(command: openClawCommand)
-        }
-
-        guard process.terminationStatus == 0 else {
+        guard result.terminationStatus == 0 else {
             throw EventDispatcherError.commandFailed(
                 command: openClawCommand,
-                status: process.terminationStatus
+                status: result.terminationStatus
             )
         }
 
@@ -73,14 +68,11 @@ public final class EventDispatcher: EventDispatching {
 
 public enum EventDispatcherError: LocalizedError, Equatable {
     case commandFailed(command: String, status: Int32)
-    case commandTimedOut(command: String)
 
     public var errorDescription: String? {
         switch self {
         case let .commandFailed(command, status):
             return "Command failed: \(command) exited with status \(status)"
-        case let .commandTimedOut(command):
-            return "Command timed out: \(command)"
         }
     }
 }

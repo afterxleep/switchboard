@@ -13,6 +13,9 @@ final class MockGitHubPolling: GitHubPolling {
     var stubbedHasUnresolvedThreads = false
     var stubbedHasConflicts = false
     var stubbedCIIsPassing = false
+    var receivedUnresolvedThreadPRNumbers: [Int] = []
+    var receivedConflictPRNumbers: [Int] = []
+    var receivedCIPassingPRNumbers: [Int] = []
 
     func poll(state: [String: StateEntry]) async throws -> [DaemonEvent] {
         receivedStates.append(state)
@@ -29,14 +32,30 @@ final class MockGitHubPolling: GitHubPolling {
     }
 
     func hasUnresolvedThreads(prNumber: Int) async throws -> Bool {
-        stubbedHasUnresolvedThreads
+        receivedUnresolvedThreadPRNumbers.append(prNumber)
+        return stubbedHasUnresolvedThreads
     }
 
     func hasConflicts(prNumber: Int) async throws -> Bool {
-        stubbedHasConflicts
+        receivedConflictPRNumbers.append(prNumber)
+        return stubbedHasConflicts
     }
 
     func ciIsPassing(prNumber: Int) async throws -> Bool {
-        stubbedCIIsPassing
+        receivedCIPassingPRNumbers.append(prNumber)
+        return stubbedCIIsPassing
+    }
+
+    func reset() {
+        stubbedEvents = []
+        stubbedErrorSequence = []
+        receivedStates.removeAll()
+        pollCallCount = 0
+        stubbedHasUnresolvedThreads = false
+        stubbedHasConflicts = false
+        stubbedCIIsPassing = false
+        receivedUnresolvedThreadPRNumbers.removeAll()
+        receivedConflictPRNumbers.removeAll()
+        receivedCIPassingPRNumbers.removeAll()
     }
 }

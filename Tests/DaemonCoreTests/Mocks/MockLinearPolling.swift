@@ -24,4 +24,11 @@ final class MockLinearPolling: LinearPolling {
 
         return stubbedEvents
     }
+
+    func reset() {
+        stubbedEvents = []
+        stubbedErrorSequence = []
+        receivedStates.removeAll()
+        pollCallCount = 0
+    }
 }

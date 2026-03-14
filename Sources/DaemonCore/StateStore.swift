@@ -4,7 +4,7 @@ public enum StateStoreError: Error, Equatable {
     case missingEntry(id: String)
 }
 
-public final class StateStore {
+public final class StateStore: StateStoring {
     private let stateFileURL: URL
     private let fileManager: FileManager
     private let encoder: JSONEncoder

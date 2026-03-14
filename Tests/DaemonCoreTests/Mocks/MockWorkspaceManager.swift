@@ -16,4 +16,11 @@ final class MockWorkspaceManager: WorkspaceManaging {
     func cleanup(completedIds: [String]) throws {
         receivedCleanupIds.append(completedIds)
     }
+
+    func reset() {
+        receivedEvents.removeAll()
+        receivedRepoPaths.removeAll()
+        receivedCleanupIds.removeAll()
+        stubbedWorkspacePath = "/tmp/workspace"
+    }
 }

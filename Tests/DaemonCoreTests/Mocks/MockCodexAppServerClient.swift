@@ -12,6 +12,8 @@ final class MockCodexAppServerClient: CodexAppServerRunning {
     var receivedPrompts: [String] = []
     var receivedTitles: [String] = []
     var receivedResumeThreadIds: [String] = []
+    var receivedTurnTimeoutSeconds: [TimeInterval] = []
+    var receivedStallTimeoutSeconds: [TimeInterval] = []
     var stubbedRunResult = true
     var stubbedResumeResult = true
 
@@ -26,6 +28,8 @@ final class MockCodexAppServerClient: CodexAppServerRunning {
         receivedWorkspaces.append(workspace)
         receivedPrompts.append(prompt)
         receivedTitles.append(title)
+        receivedTurnTimeoutSeconds.append(turnTimeoutSeconds)
+        receivedStallTimeoutSeconds.append(stallTimeoutSeconds)
         return stubbedRunResult
     }
 
@@ -42,6 +46,24 @@ final class MockCodexAppServerClient: CodexAppServerRunning {
         receivedPrompts.append(prompt)
         receivedTitles.append(title)
         receivedResumeThreadIds.append(threadId)
+        receivedTurnTimeoutSeconds.append(turnTimeoutSeconds)
+        receivedStallTimeoutSeconds.append(stallTimeoutSeconds)
         return stubbedResumeResult
+    }
+
+    func reset() {
+        lastThreadId = nil
+        lastThreadPath = nil
+        lastProcessIdentifier = nil
+        lastTokensUsed = 0
+        lastError = nil
+        receivedWorkspaces.removeAll()
+        receivedPrompts.removeAll()
+        receivedTitles.removeAll()
+        receivedResumeThreadIds.removeAll()
+        receivedTurnTimeoutSeconds.removeAll()
+        receivedStallTimeoutSeconds.removeAll()
+        stubbedRunResult = true
+        stubbedResumeResult = true
     }
 }

@@ -115,6 +115,62 @@ final class GitHubPollerPREventsTests: XCTestCase {
         XCTAssertFalse(events.contains(.prOpened(pr: 145, branch: "kai/db-200-add-x", title: "Add lifecycle")))
     }
 
+    func test_hasConflicts_whenPullRequestIsDirty_returnsTrue() async throws {
+        // Arrange
+        let poller = GitHubPoller(token: "github-token", repo: "afterxleep/flowdeck", urlSession: session)
+        MockURLProtocol.requestHandler = Self.makeHandler(
+            openPRs: #"[{"number":145,"title":"Add lifecycle","state":"open","merged_at":null,"head":{"ref":"kai/db-200-add-x","sha":"abc123"},"mergeable_state":"dirty"}]"#,
+            closedPRs: "[]",
+            checkRuns: #"{"check_runs":[]}"#,
+            reviews: "[]",
+            prComments: "[]",
+            issueComments: "[]",
+            threads: #"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}"#
+        )
+
+        // Act
+        let hasConflicts = try await poller.hasConflicts(prNumber: 145)
+
+        // Assert
+        XCTAssertTrue(hasConflicts)
+    }
+
+    func test_hasUnresolvedThreads_whenGraphQLIncludesOpenThread_returnsTrue() async throws {
+        // Arrange
+        let poller = GitHubPoller(token: "github-token", repo: "afterxleep/flowdeck", urlSession: session)
+        MockURLProtocol.requestHandler = Self.makeHandler(
+            openPRs: "[]",
+            closedPRs: "[]",
+            checkRuns: #"{"check_runs":[]}"#,
+            reviews: "[]",
+            prComments: "[]",
+            issueComments: "[]",
+            threads: #"{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"thread-1","isResolved":false,"path":"Sources/File.swift","comments":{"nodes":[{"body":"Please fix","author":{"login":"reviewer"}}]}}]}}}}}"#
+        )
+
+        // Act
+        let hasThreads = try await poller.hasUnresolvedThreads(prNumber: 145)
+
+        // Assert
+        XCTAssertTrue(hasThreads)
+    }
+
+    func test_poll_whenGitHubReturnsHTTPError_throwsContextualError() async {
+        // Arrange
+        let poller = GitHubPoller(token: "github-token", repo: "afterxleep/flowdeck", urlSession: session)
+        MockURLProtocol.requestHandler = { _ in
+            Self.response(body: "{}", statusCode: 503)
+        }
+
+        // Act / Assert
+        await XCTAssertThrowsErrorAsync(try await poller.poll(state: [:])) { error in
+            XCTAssertEqual(
+                error as? GitHubPollerError,
+                .httpError(path: "/repos/afterxleep/flowdeck/pulls?state=open", statusCode: 503)
+            )
+        }
+    }
+
     private static func makeHandler(
         openPRs: String,
         closedPRs: String,
