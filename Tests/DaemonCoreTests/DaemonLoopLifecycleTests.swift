@@ -987,4 +987,103 @@ extension DaemonLoopLifecycleTests {
         XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnReview, "should not overwrite existing tracked entry")
     }
 
+    // MARK: - reviewComment deduplication
+
+    func test_reviewComment_marksEventAsDoneInState() async throws {
+        // Arrange
+        let store = makeStore()
+        try seedTrackedEntry(store: store)
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
+
+        // Act
+        try await loop.routeForTesting(DaemonEvent.reviewComment(pr: 145, body: "Fix this", author: "afterxleep"))
+
+        // Assert
+        let state = try store.load()
+        let marker = state["gh:pr:145:review_comment"]
+        XCTAssertEqual(marker?.status, .done, "reviewComment event must be marked done for deduplication")
+    }
+
+    func test_reviewComment_whenAgentAlreadyRunning_doesNotSpawnSecondAgent() async throws {
+        // Arrange
+        let store = makeStore()
+        try seedTrackedEntry(store: store)
+        let runner = MockAgentRunner()
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager())
+
+        // Start first agent via reviewComment
+        try await loop.routeForTesting(DaemonEvent.reviewComment(pr: 145, body: "First", author: "afterxleep"))
+        try await Task.sleep(nanoseconds: 50_000_000)  // Let first Task run
+        let agentCount1 = runner.receivedEvents.count  // Baseline: 1 agent has run
+
+        // Act — second comment arrives while agent is still in runningAgents
+        try await loop.routeForTesting(DaemonEvent.reviewComment(pr: 145, body: "Second", author: "afterxleep"))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // Assert — no additional agent spawned
+        XCTAssertEqual(runner.receivedEvents.count, agentCount1, "should not spawn second agent when one is already running")
+    }
+
+    // MARK: - unresolvedThread deduplication
+
+    func test_unresolvedThread_marksEventAsInFlightInState() async throws {
+        // Arrange
+        let store = makeStore()
+        try seedTrackedEntry(store: store)
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
+
+        // Act
+        let event = DaemonEvent.unresolvedThread(pr: 145, threadId: "T1", nodeId: "N1", path: "File.swift", body: "Fix", author: "afterxleep")
+        try await loop.routeForTesting(event)
+
+        // Assert
+        let state = try store.load()
+        let marker = state["gh:pr:145:thread:T1"]
+        XCTAssertEqual(marker?.status, .inFlight, "unresolvedThread must be marked inFlight while agent works on it")
+    }
+
+    func test_unresolvedThread_whenMarkerAlreadyInFlight_doesNotTriggerSecondAgent() async throws {
+        // Arrange
+        let store = makeStore()
+        try seedTrackedEntry(store: store)
+        let runner = MockAgentRunner()
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager())
+        let event = DaemonEvent.unresolvedThread(pr: 145, threadId: "T1", nodeId: "N1", path: "File.swift", body: "Fix", author: "afterxleep")
+
+        // Act — route same thread event twice
+        try await loop.routeForTesting(event)
+        try await loop.routeForTesting(event)
+
+        // Assert — only one agent started
+        XCTAssertEqual(runner.receivedEvents.count, 1, "inFlight marker must block duplicate agent for same thread")
+    }
+
+    func test_agentFailure_resetsUnresolvedThreadMarkersForRetry() async throws {
+        // Arrange
+        let store = makeStore()
+        try seedTrackedEntry(store: store)
+        // Seed an inFlight thread marker
+        try store.upsert(StateEntry(
+            id: "gh:pr:145:thread:T1",
+            status: .inFlight,
+            eventType: "unresolved_thread",
+            details: "",
+            startedAt: Date(),
+            updatedAt: Date()
+        ))
+        let runner = MockAgentRunner()
+        runner.stubbedResult = AgentResult(success: false, tokensUsed: 0, error: "boom", threadId: nil, threadPath: nil)
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager())
+
+        // Trigger an agent run
+        try await loop.routeForTesting(DaemonEvent.reviewComment(pr: 145, body: "Fix", author: "afterxleep"))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try await loop.tick()
+
+        // Assert — thread marker reset to pending so it can retry
+        let state = try store.load()
+        let marker = state["gh:pr:145:thread:T1"]
+        XCTAssertEqual(marker?.status, .pending, "thread marker must be reset to pending on agent failure")
+    }
+
 }

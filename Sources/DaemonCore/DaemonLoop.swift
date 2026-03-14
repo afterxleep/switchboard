@@ -319,11 +319,31 @@ public final class DaemonLoop {
             }
             startAgentIfIdle(event: event, entry: entry)
 
-        case let .reviewComment(pr, _, _),
-             let .unresolvedThread(pr, _, _, _, _, _):
-            guard let entry = stateStore.entry(forPR: pr) else {
-                return
+        case let .reviewComment(pr, _, _):
+            guard let entry = stateStore.entry(forPR: pr) else { return }
+            // Mark as done — prevents historical comments from replaying on subsequent ticks
+            try stateStore.upsert(StateEntry(
+                id: event.eventId, status: .done, eventType: event.eventType,
+                details: "", startedAt: nil, updatedAt: Date()
+            ))
+            // Skip if agent is already actively addressing feedback for this PR
+            guard entry.agentPhase != .addressingFeedback || runningAgent(for: entry.id) == nil else { return }
+            try stateStore.updatePhase(id: entry.id, phase: .addressingFeedback)
+            if let linearIssueId = entry.linearIssueId {
+                try? await linearStateManager?.moveToInProgress(issueId: linearIssueId)
             }
+            startAgentIfIdle(event: event, entry: entry)
+
+        case let .unresolvedThread(pr, _, _, _, _, _):
+            guard let entry = stateStore.entry(forPR: pr) else { return }
+            // Use inFlight marker so a retry is possible if the agent fails without resolving the thread
+            let existing = try? stateStore.load()[event.eventId]
+            guard existing == nil || existing?.status == .pending else { return }
+            try stateStore.upsert(StateEntry(
+                id: event.eventId, status: .inFlight, eventType: event.eventType,
+                details: "", startedAt: Date(), updatedAt: Date()
+            ))
+            guard entry.agentPhase != .addressingFeedback || runningAgent(for: entry.id) == nil else { return }
             try stateStore.updatePhase(id: entry.id, phase: .addressingFeedback)
             if let linearIssueId = entry.linearIssueId {
                 try? await linearStateManager?.moveToInProgress(issueId: linearIssueId)
@@ -474,12 +494,19 @@ public final class DaemonLoop {
                 let entry = try stateStore.load()[completedId]
                 if let retryCount = entry?.retryCount, retryCount >= config.maxAgentRetries {
                     // Reset retry counter and re-queue — never dispatch synthetic fallback events
-                    // (they create duplicate state entries via the old EventDispatcher path)
                     try stateStore.resetRetry(id: completedId)
                     try stateStore.markPending(id: completedId)
                     logger("agent exhausted retries for \(completedId), resetting and re-queuing")
                 } else {
                     try stateStore.markPending(id: completedId)
+                }
+                // Reset any inFlight unresolvedThread markers for this entry's PR so they can re-trigger
+                if let prNumber = entry?.prNumber {
+                    let state = try stateStore.load()
+                    let threadPrefix = "gh:pr:\(prNumber):thread:"
+                    for (key, marker) in state where key.hasPrefix(threadPrefix) && marker.status == .inFlight {
+                        try stateStore.markPending(id: key)
+                    }
                 }
                 logger("agent run failed for \(completedId): \(result.error ?? "unknown error")")
             }
