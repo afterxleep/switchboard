@@ -111,6 +111,10 @@ Create a `.env` file or export the following environment variables:
 LINEAR_API_KEY=lin_api_xxxxxxxxxxxxxxxxxxxx
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 
+# Agent identity — the daemon ONLY monitors issues and PRs belonging to this agent
+LINEAR_ASSIGNEE_ID=<linear-user-uuid>          # Only Linear issues assigned to this user
+GITHUB_ASSIGNEE=kaimercercli                   # Only PRs opened by this GitHub handle
+
 # Linear configuration
 LINEAR_TEAM_SLUG=DB                             # Your team's identifier prefix (e.g. "DB" for DB-123)
 LINEAR_IN_PROGRESS_STATE_ID=<uuid>              # "In Progress" state UUID

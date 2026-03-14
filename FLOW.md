@@ -165,6 +165,18 @@ When a PR is opened, the daemon immediately requests a review from the configure
 
 ---
 
+## Scope — what the daemon monitors
+
+The daemon is scoped to a single agent. It only sees what belongs to that agent.
+
+**Linear issues:** Only issues assigned to `LINEAR_ASSIGNEE_ID` are picked up. Issues assigned to humans or other agents are invisible.
+
+**GitHub PRs:** Only PRs opened by `GITHUB_ASSIGNEE` are monitored. When the agent opens a PR, it pushes using its own GitHub credentials — the PR author is automatically the agent. The daemon filters by PR author on every poll.
+
+If an issue or PR doesn't belong to the configured agent, the daemon ignores it completely. This is intentional — it means multiple agents can run against the same repo and Linear workspace without interfering with each other.
+
+---
+
 ## What never happens
 
 - An issue moves to In Review while the agent is running
