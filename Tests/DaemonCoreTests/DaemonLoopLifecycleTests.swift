@@ -959,4 +959,32 @@ extension DaemonLoopLifecycleTests {
         XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI)
     }
 
+    func test_newIssue_whenEntryAlreadyTrackedWithPR_doesNotOverwritePhase() async throws {
+        // Arrange — entry already in waitingOnReview
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-600",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-600",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 300,
+            linearIssueId: "issue-600",
+            agentPhase: .waitingOnReview
+        ))
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedExistingPR = (prNumber: 300, branch: "kai/db-600-fix", title: "Fix")
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
+
+        // Act — re-route the same issue (simulates next tick from LinearPoller)
+        let event = DaemonEvent.newIssue(id: "issue-600", identifier: "DB-600", title: "Fix", description: nil)
+        try await loop.routeForTesting(event)
+
+        // Assert — phase must not be reset to waitingOnCI
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["linear:DB-600"])
+        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnReview, "should not overwrite existing tracked entry")
+    }
+
 }

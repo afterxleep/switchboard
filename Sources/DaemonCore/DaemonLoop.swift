@@ -200,6 +200,11 @@ public final class DaemonLoop {
             }
 
             if let existing = existingPR {
+                // If an entry already exists with this PR attached, don't overwrite its phase
+                let currentState = try stateStore.load()
+                if let current = currentState[eventId], current.prNumber != nil {
+                    return  // Already tracked — let reconcile manage phase transitions
+                }
                 let entry = StateEntry(
                     id: eventId,
                     status: .inFlight,
