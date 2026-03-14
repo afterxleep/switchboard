@@ -185,11 +185,8 @@ public final class DaemonLoop {
                     agentPhase: .waitingOnCI
                 )
                 try stateStore.upsert(entry)
-                try? await linearStateManager?.moveToInProgress(issueId: id)
+                // Do NOT touch Linear state here — issue is already In Review, preserve it
                 logger("attached existing PR #\(existing.prNumber) to \(identifier)")
-                if config.githubReviewer.isEmpty == false {
-                    try? await prReviewRequester?.requestReview(pr: existing.prNumber, reviewer: config.githubReviewer)
-                }
                 return
             }
 
