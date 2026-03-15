@@ -538,26 +538,6 @@ final class DaemonLoopLifecycleTests: XCTestCase {
         XCTAssertEqual(workspaceManager.receivedCleanupIds, [["linear:DB-200"]])
     }
 
-    func test_reconcile_whenWaitingOnReviewHasUnresolvedThreads_movesIssueBackToInProgress() async throws {
-        let stateStore = makeStore()
-        try seedTrackedEntry(store: stateStore, phase: .waitingOnReview)
-        let githubPoller = MockGitHubPolling()
-        githubPoller.stubbedHasUnresolvedThreads = true
-        let linearManager = MockLinearStateManager()
-        let loop = makeLoop(
-            stateStore: stateStore,
-            githubPoller: githubPoller,
-            agentRunner: MockAgentRunner(),
-            linearManager: linearManager
-        )
-
-        try await loop.reconcile()
-
-        XCTAssertEqual(try stateStore.load()["linear:DB-200"]?.agentPhase, .addressingFeedback)
-        XCTAssertEqual(linearManager.inProgressIssueIds, ["issue-200"])
-        XCTAssertEqual(githubPoller.receivedUnresolvedThreadPRNumbers, [145])
-    }
-
     func test_newIssue_whenOpenPRExists_attachesPRInsteadOfSpawningAgent() async throws {
         // Arrange
         let store = makeStore()
@@ -836,6 +816,35 @@ extension DaemonLoopLifecycleTests {
         let state = try store.load()
         let entry = try XCTUnwrap(state["linear:DB-401"])
         XCTAssertEqual(entry.agentPhase, AgentPhase.addressingFeedback)
+    }
+
+    func test_reconcile_whenCIBlocked_keepsPhase() async throws {
+        // Arrange
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-402",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-402",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 402,
+            linearIssueId: "issue-402",
+            agentPhase: .ciBlocked,
+            consecutiveCIFailures: 10
+        ))
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedHasUnresolvedThreads = false
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
+
+        // Act
+        try await loop.reconcile()
+
+        // Assert
+        let state = try store.load()
+        let entry = try XCTUnwrap(state["linear:DB-402"])
+        XCTAssertEqual(entry.agentPhase, .ciBlocked)
+        XCTAssertEqual(entry.consecutiveCIFailures, 10)
     }
 
     // MARK: - Concurrency cap
@@ -1273,6 +1282,38 @@ extension DaemonLoopLifecycleTests {
         XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnReview)
         XCTAssertEqual(entry.consecutiveCIFailures, 0)
         XCTAssertEqual(linearManager.inReviewIssueIds, ["issue-950"])
+    }
+
+    func test_ciPassed_whenCIBlockedAndThreadsRemain_unblockToWaitingOnCI() async throws {
+        // Arrange — entry stuck in ciBlocked with unresolved review threads
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-951",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-951",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 951,
+            linearIssueId: "issue-951",
+            agentPhase: .ciBlocked,
+            consecutiveCIFailures: 10
+        ))
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedHasUnresolvedThreads = true
+        let linearManager = MockLinearStateManager()
+        let prMerger = MockPRMerger()
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: linearManager, prMerger: prMerger)
+
+        // Act
+        try await loop.routeForTesting(.ciPassed(pr: 951, branch: "kai/db-951"))
+
+        // Assert
+        let entry = try XCTUnwrap(try store.load()["linear:DB-951"])
+        XCTAssertEqual(entry.agentPhase, .waitingOnCI)
+        XCTAssertEqual(entry.consecutiveCIFailures, 0)
+        XCTAssertTrue(linearManager.inReviewIssueIds.isEmpty)
+        XCTAssertTrue(prMerger.receivedMergeRequests.isEmpty)
     }
 
 }

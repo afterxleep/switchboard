@@ -120,31 +120,25 @@ public final class DaemonLoop {
         cancelAllAgents()
     }
 
-    // MARK: - Reconcile (timeout recovery + thread check only)
+    // MARK: - Reconcile (timeout recovery only)
 
     public func reconcile() async throws {
         let state = try stateStore.load()
 
-        // (a) Re-queue timed-out inFlight entries
         for entry in state.values where entry.status == .inFlight && entry.timedOut(after: config.inFlightTimeoutSeconds) {
             let task = removeRunningAgent(id: entry.id)
             task?.cancel()
             _ = removeCompletedAgentResult(id: entry.id)
-            try stateStore.markPending(id: entry.id)
-            logger("re-queued timed-out agent: \(entry.id)")
-        }
-
-        // (b) Check waitingOnReview entries for new unresolved threads
-        for entry in state.values where entry.agentPhase == .waitingOnReview {
-            guard let prNumber = entry.prNumber else {
-                continue
-            }
-            if try await githubPoller.hasUnresolvedThreads(prNumber: prNumber) {
-                try stateStore.updatePhase(id: entry.id, phase: .addressingFeedback)
-                if let linearIssueId = entry.linearIssueId {
-                    try? await linearStateManager?.moveToInProgress(issueId: linearIssueId)
-                }
-            }
+            var resetEntry = entry
+            resetEntry.status = .pending
+            resetEntry.startedAt = nil
+            resetEntry.updatedAt = Date()
+            resetEntry.sessionId = nil
+            resetEntry.agentPid = nil
+            resetEntry.tokensUsed = nil
+            resetEntry.agentPhase = .coding
+            try stateStore.upsert(resetEntry)
+            logger("reconcile: reset timed-out entry \(entry.id)")
         }
     }
 

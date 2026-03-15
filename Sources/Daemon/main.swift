@@ -88,7 +88,17 @@ private func installSignalHandlers(loop: DaemonLoop) {
 }
 
 let config = makeConfig()
-let stateStore = StateStore(stateFilePath: config.stateFilePath)
+let stateDatabasePath = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent(".flowdeck-daemon", isDirectory: true)
+    .appendingPathComponent("state.db")
+    .path
+let stateStore: StateStoring
+do {
+    stateStore = try SQLiteStateStore(dbPath: stateDatabasePath)
+} catch {
+    fputs("Failed to initialize SQLite state store: \(error.localizedDescription)\n", stderr)
+    exit(1)
+}
 let linearPoller = LinearPoller(
     apiKey: config.linearApiKey,
     teamSlug: config.linearTeamSlug,
