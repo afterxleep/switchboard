@@ -15,10 +15,11 @@ final class AgentPhaseTests: XCTestCase {
                 .waitingOnCI,
                 .waitingOnReview,
                 .addressingFeedback,
+                .ciBlocked,
                 .merged,
                 .done,
             ].map(\.rawValue),
-            ["coding", "waitingOnCI", "waitingOnReview", "addressingFeedback", "merged", "done"]
+            ["coding", "waitingOnCI", "waitingOnReview", "addressingFeedback", "ciBlocked", "merged", "done"]
         )
     }
 }

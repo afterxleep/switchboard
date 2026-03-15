@@ -23,6 +23,7 @@ public protocol StateStoring {
     func updateLinearIssueId(id: String, linearIssueId: String) throws
     func entry(forPR prNumber: Int) -> StateEntry?
     func attachPR(id: String, prNumber: Int, title: String?, threadPath: String?) throws
+    func clearPR(id: String) throws
     func updatePhase(id: String, phase: AgentPhase) throws
     func markTurnStarted(id: String) throws
     func incrementRetry(id: String) throws

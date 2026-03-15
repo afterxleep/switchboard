@@ -102,7 +102,11 @@ public struct StateEntry: Codable, Equatable {
         prTitle = try container.decodeIfPresent(String.self, forKey: .prTitle)
         threadPath = try container.decodeIfPresent(String.self, forKey: .threadPath)
         linearIssueId = try container.decodeIfPresent(String.self, forKey: .linearIssueId)
-        agentPhase = try container.decodeIfPresent(AgentPhase.self, forKey: .agentPhase) ?? .coding
+        if let phaseString = try container.decodeIfPresent(String.self, forKey: .agentPhase) {
+            agentPhase = AgentPhase(rawValue: phaseString) ?? .coding
+        } else {
+            agentPhase = .coding
+        }
         lastTurnAt = try container.decodeIfPresent(Date.self, forKey: .lastTurnAt)
         retryCount = try container.decodeIfPresent(Int.self, forKey: .retryCount) ?? 0
         consecutiveCIFailures = try container.decodeIfPresent(Int.self, forKey: .consecutiveCIFailures) ?? 0

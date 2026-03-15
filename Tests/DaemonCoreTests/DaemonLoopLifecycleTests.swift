@@ -642,6 +642,7 @@ final class DaemonLoopLifecycleTests: XCTestCase {
         reviewThreadResolver: MockReviewThreadResolver? = nil,
         workspaceManager: MockWorkspaceManager = MockWorkspaceManager(),
         maxAgentRetries: Int = 3,
+        maxConsecutiveCIFailures: Int = 10,
         maxConcurrentAgents: Int = 10,
         githubReviewer: String = "",
         logger: @escaping (String) -> Void = { _ in }
@@ -662,6 +663,7 @@ final class DaemonLoopLifecycleTests: XCTestCase {
                 repoPath: "~/Developer/flowdeck",
                 workflowTemplatePath: "~/.flowdeck-daemon/WORKFLOW.md",
                 maxAgentRetries: maxAgentRetries,
+                maxConsecutiveCIFailures: maxConsecutiveCIFailures,
                 maxConcurrentAgents: maxConcurrentAgents
             ),
             linearPoller: linearPoller,
@@ -779,9 +781,9 @@ extension DaemonLoopLifecycleTests {
         XCTAssertNil(entry.linearIssueId)
     }
 
-    // MARK: - reconcile self-heals addressingFeedback
+    // MARK: - reconcile does NOT self-heal phases (event-driven only)
 
-    func test_reconcile_whenAddressingFeedbackHasNoThreadsAndNoConflicts_advancesToWaitingOnCI() async throws {
+    func test_reconcile_whenAddressingFeedbackHasNoThreads_doesNotAdvancePhase() async throws {
         // Arrange
         let store = makeStore()
         try store.upsert(StateEntry(
@@ -803,10 +805,10 @@ extension DaemonLoopLifecycleTests {
         // Act
         try await loop.reconcile()
 
-        // Assert
+        // Assert — reconcile no longer moves addressingFeedback forward
         let state = try store.load()
         let entry = try XCTUnwrap(state["linear:DB-400"])
-        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI)
+        XCTAssertEqual(entry.agentPhase, AgentPhase.addressingFeedback)
     }
 
     func test_reconcile_whenAddressingFeedbackHasUnresolvedThreads_keepsPhase() async throws {
@@ -872,8 +874,8 @@ extension DaemonLoopLifecycleTests {
         // Assert — only 1 agent started despite 2 events
         XCTAssertEqual(runner.receivedEvents.count, 1, "concurrency cap should defer the second agent")
     }
-    func test_reconcile_whenWaitingOnCIButCIAlreadyPassing_advancesToWaitingOnReview() async throws {
-        // Arrange
+    func test_reconcile_whenWaitingOnCI_doesNotAdvancePhase() async throws {
+        // Arrange — reconcile no longer self-heals waitingOnCI entries
         let store = makeStore()
         try store.upsert(StateEntry(
             id: "linear:DB-500",
@@ -895,68 +897,11 @@ extension DaemonLoopLifecycleTests {
         // Act
         try await loop.reconcile()
 
-        // Assert
+        // Assert — phase stays at waitingOnCI; only ciPassed event advances it
         let state = try store.load()
         let entry = try XCTUnwrap(state["linear:DB-500"])
-        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnReview)
-        XCTAssertEqual(linearManager.inReviewIssueIds, ["issue-500"])
-    }
-
-    func test_reconcile_whenWaitingOnCIButCIAlreadyPassingWithThreads_advancesToAddressingFeedback() async throws {
-        // Arrange
-        let store = makeStore()
-        try store.upsert(StateEntry(
-            id: "linear:DB-501",
-            status: .pending,
-            eventType: "new_issue",
-            details: "DB-501",
-            startedAt: nil,
-            updatedAt: Date(),
-            prNumber: 201,
-            linearIssueId: "issue-501",
-            agentPhase: .waitingOnCI
-        ))
-        let githubPoller = MockGitHubPolling()
-        githubPoller.stubbedCIIsPassing = true
-        githubPoller.stubbedHasUnresolvedThreads = true
-        let linearManager = MockLinearStateManager()
-        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: linearManager)
-
-        // Act
-        try await loop.reconcile()
-
-        // Assert
-        let state = try store.load()
-        let entry = try XCTUnwrap(state["linear:DB-501"])
-        XCTAssertEqual(entry.agentPhase, AgentPhase.addressingFeedback)
-        XCTAssertEqual(linearManager.inProgressIssueIds, ["issue-501"])
-    }
-
-    func test_reconcile_whenWaitingOnCIAndCINotPassing_keepsPhase() async throws {
-        // Arrange
-        let store = makeStore()
-        try store.upsert(StateEntry(
-            id: "linear:DB-502",
-            status: .pending,
-            eventType: "new_issue",
-            details: "DB-502",
-            startedAt: nil,
-            updatedAt: Date(),
-            prNumber: 202,
-            linearIssueId: "issue-502",
-            agentPhase: .waitingOnCI
-        ))
-        let githubPoller = MockGitHubPolling()
-        githubPoller.stubbedCIIsPassing = false
-        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
-
-        // Act
-        try await loop.reconcile()
-
-        // Assert
-        let state = try store.load()
-        let entry = try XCTUnwrap(state["linear:DB-502"])
         XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI)
+        XCTAssertTrue(linearManager.inReviewIssueIds.isEmpty)
     }
 
     func test_newIssue_whenEntryAlreadyTrackedWithPR_doesNotOverwritePhase() async throws {
@@ -1086,8 +1031,110 @@ extension DaemonLoopLifecycleTests {
         XCTAssertEqual(marker?.status, .pending, "thread marker must be reset to pending on agent failure")
     }
 
-    func test_reconcile_whenCodingPhaseHasPRAttached_advancesToWaitingOnCI() async throws {
-        // Arrange — coding entry with PR already attached (phase got stuck)
+    // MARK: - Bug 1: prClosed clears PR to prevent self-heal loop
+
+    func test_prClosed_clearsPRNumberAndResetsPhase() async throws {
+        // Arrange — entry with PR attached in waitingOnCI
+        let store = makeStore()
+        try seedTrackedEntry(store: store, phase: .waitingOnCI)
+        let runner = MockAgentRunner()
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager())
+
+        // Act
+        try await loop.routeForTesting(.prClosed(pr: 145, branch: "kai/db-200-add-x"))
+
+        // Assert — prNumber cleared, phase reset to coding
+        let entry = try XCTUnwrap(try store.load()["linear:DB-200"])
+        XCTAssertNil(entry.prNumber, "prClosed must clear prNumber to prevent self-heal loop")
+        XCTAssertNil(entry.prTitle, "prClosed must clear prTitle")
+        XCTAssertEqual(entry.agentPhase, AgentPhase.coding)
+    }
+
+    func test_prClosed_startsAgentToReopenPR() async throws {
+        let store = makeStore()
+        try seedTrackedEntry(store: store, phase: .waitingOnCI)
+        let runner = MockAgentRunner()
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager())
+
+        try await loop.routeForTesting(.prClosed(pr: 145, branch: "kai/db-200-add-x"))
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(runner.receivedEvents.count, 1, "prClosed must start agent to reopen/create PR")
+    }
+
+    // MARK: - Bug 2: CI failure ceiling
+
+    func test_ciFailure_atCeiling_doesNotSpawnAgent() async throws {
+        // Arrange — entry at CI failure ceiling
+        let store = makeStore()
+        try seedTrackedEntry(store: store, phase: .waitingOnCI)
+        let runner = MockAgentRunner()
+        let logSink = LogSink()
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager(), maxConsecutiveCIFailures: 3, logger: logSink.log)
+
+        // Act — push failures up to and past ceiling (ciFailureThreshold defaults to 2, ceiling = 3)
+        for _ in 0..<4 {
+            try await loop.routeForTesting(.ciFailure(pr: 145, branch: "kai/db-200-add-x", failedChecks: ["TestE2E"]))
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // Assert — entry should be in ciBlocked phase after ceiling hit
+        let entry = try XCTUnwrap(try store.load()["linear:DB-200"])
+        XCTAssertEqual(entry.agentPhase, AgentPhase.ciBlocked)
+        XCTAssertTrue(logSink.messages.contains(where: { $0.contains("CI failure ceiling reached") }), "must log ceiling message")
+    }
+
+    // MARK: - Bug 3: Retry exhaustion does not reset
+
+    func test_retryExhaustion_doesNotResetRetryCount() async throws {
+        // Arrange — entry with retries about to be exhausted
+        let store = makeStore()
+        try seedTrackedEntry(store: store, phase: .addressingFeedback)
+        let runner = MockAgentRunner()
+        runner.stubbedResult = AgentResult(success: false, tokensUsed: 0, error: "timeout", threadId: nil, threadPath: nil)
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager(), maxAgentRetries: 1)
+
+        // Act — trigger agent, let it fail
+        try await loop.routeForTesting(.reviewComment(pr: 145, body: "Fix", author: "afterxleep"))
+        try await Task.sleep(nanoseconds: 150_000_000)
+        try await loop.tick()
+
+        // Assert — retryCount should be >= maxAgentRetries, NOT reset to 0
+        let entry = try XCTUnwrap(try store.load()["linear:DB-200"])
+        XCTAssertGreaterThanOrEqual(entry.retryCount, 1, "retryCount must NOT be reset after exhaustion")
+    }
+
+    func test_startAgentIfIdle_skipsExhaustedEntries() async throws {
+        // Arrange — entry with retries exhausted, consecutiveCIFailures already at threshold-1
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-800",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-800",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 800,
+            linearIssueId: "issue-800",
+            agentPhase: .addressingFeedback,
+            retryCount: 3,
+            consecutiveCIFailures: 1
+        ))
+        let runner = MockAgentRunner()
+        let logSink = LogSink()
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager(), maxAgentRetries: 3, logger: logSink.log)
+
+        // Act — one more CI failure pushes past ciFailureThreshold (2), reaching startAgentIfIdle
+        try await loop.routeForTesting(.ciFailure(pr: 800, branch: "kai/db-800", failedChecks: ["Tests"]))
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // Assert — no agent spawned because retryCount >= maxAgentRetries
+        XCTAssertTrue(runner.receivedEvents.isEmpty, "exhausted entries must not spawn agents")
+        XCTAssertTrue(logSink.messages.contains(where: { $0.contains("retry limit reached") }), "must log retry limit message")
+    }
+
+    func test_reconcile_whenCodingPhaseHasPRAttached_doesNotAdvancePhase() async throws {
+        // Arrange — coding entry with PR attached; reconcile no longer self-heals this
         let store = makeStore()
         try store.upsert(StateEntry(
             id: "linear:DB-700",
@@ -1105,9 +1152,127 @@ extension DaemonLoopLifecycleTests {
         // Act
         try await loop.reconcile()
 
-        // Assert
+        // Assert — phase stays at coding; only prOpened event transitions to waitingOnCI
         let entry = try XCTUnwrap(try store.load()["linear:DB-700"])
-        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI, "coding entry with PR attached must advance to waitingOnCI")
+        XCTAssertEqual(entry.agentPhase, AgentPhase.coding, "reconcile must not self-heal coding entries — use events instead")
+    }
+
+    // MARK: - Bug fix: closed linked PR should not be re-attached
+
+    func test_newIssue_whenLinkedPRIsClosed_doesNotAttachPR() async throws {
+        // Arrange
+        let store = makeStore()
+        let runner = MockAgentRunner()
+        runner.stubbedResult = AgentResult(success: true, tokensUsed: 10, error: nil, threadId: "t-1", threadPath: "/tmp/t-1.jsonl")
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedIsPROpen = false
+        let linearManager = MockLinearStateManager()
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: runner, linearManager: linearManager)
+
+        // Act
+        let event = DaemonEvent.newIssue(id: "issue-177", identifier: "DB-177", title: "Fix bug", description: nil, linkedPRNumber: 139)
+        try await loop.routeForTesting(event)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // Assert — PR should NOT be attached; agent should be spawned for coding instead
+        let entry = try XCTUnwrap(try store.load()["linear:DB-177"])
+        XCTAssertNil(entry.prNumber, "closed PR must not be attached")
+        XCTAssertEqual(entry.agentPhase, AgentPhase.coding, "should start coding when linked PR is closed")
+        XCTAssertEqual(githubPoller.receivedIsPROpenNumbers, [139], "should check if linked PR is open")
+        XCTAssertTrue(githubPoller.receivedFindOpenPRIdentifiers.isEmpty, "should not fall back to findOpenPR")
+        XCTAssertEqual(runner.receivedEvents.count, 1, "should spawn agent for coding")
+    }
+
+    // MARK: - Bug fix: CI ceiling enforced in startAgentIfIdle
+
+    func test_startAgentIfIdle_respectsCIBlocked_viaReviewComment() async throws {
+        // Arrange — entry in ciBlocked phase
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-900",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-900",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 900,
+            linearIssueId: "issue-900",
+            agentPhase: .ciBlocked,
+            consecutiveCIFailures: 10
+        ))
+        let runner = MockAgentRunner()
+        let logSink = LogSink()
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager(), maxConsecutiveCIFailures: 10, logger: logSink.log)
+
+        // Act — reviewComment on a ciBlocked entry
+        try await loop.routeForTesting(.reviewComment(pr: 900, body: "Please fix", author: "reviewer"))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // Assert — no agent spawned, phase stays ciBlocked
+        XCTAssertTrue(runner.receivedEvents.isEmpty, "ciBlocked must prevent agent start via reviewComment")
+        let entry900 = try XCTUnwrap(try store.load()["linear:DB-900"])
+        XCTAssertEqual(entry900.agentPhase, .ciBlocked, "phase must remain ciBlocked")
+    }
+
+    func test_startAgentIfIdle_respectsCIBlocked_viaConflict() async throws {
+        // Arrange — entry in ciBlocked phase
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-901",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-901",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 901,
+            linearIssueId: "issue-901",
+            agentPhase: .ciBlocked,
+            consecutiveCIFailures: 5
+        ))
+        let runner = MockAgentRunner()
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: runner, linearManager: MockLinearStateManager(), maxConsecutiveCIFailures: 5)
+
+        // Act — conflict event on a ciBlocked entry
+        try await loop.routeForTesting(.conflict(pr: 901, branch: "kai/db-901"))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // Assert — no agent spawned, phase stays ciBlocked
+        XCTAssertTrue(runner.receivedEvents.isEmpty, "ciBlocked must prevent agent start via conflict")
+        let entry901 = try XCTUnwrap(try store.load()["linear:DB-901"])
+        XCTAssertEqual(entry901.agentPhase, .ciBlocked, "phase must remain ciBlocked")
+    }
+
+    // MARK: - ciPassed unblocks ciBlocked entries
+
+    func test_ciPassed_whenCIBlocked_unblockAndAdvance() async throws {
+        // Arrange — entry stuck in ciBlocked
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-950",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-950",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 950,
+            linearIssueId: "issue-950",
+            agentPhase: .ciBlocked,
+            consecutiveCIFailures: 10
+        ))
+        let githubPoller = MockGitHubPolling()
+        githubPoller.stubbedHasUnresolvedThreads = false
+        let linearManager = MockLinearStateManager()
+        let prMerger = MockPRMerger()
+        let loop = makeLoop(stateStore: store, githubPoller: githubPoller, agentRunner: MockAgentRunner(), linearManager: linearManager, prMerger: prMerger)
+
+        // Act
+        try await loop.routeForTesting(.ciPassed(pr: 950, branch: "kai/db-950"))
+
+        // Assert — unblocked, moved to waitingOnReview (CI passing + no threads)
+        let entry = try XCTUnwrap(try store.load()["linear:DB-950"])
+        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnReview)
+        XCTAssertEqual(entry.consecutiveCIFailures, 0)
+        XCTAssertEqual(linearManager.inReviewIssueIds, ["issue-950"])
     }
 
 }

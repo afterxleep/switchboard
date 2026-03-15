@@ -22,6 +22,7 @@ public struct DaemonConfig {
     public let linearDoneStateId: String
     public let maxAgentRetries: Int
     public let ciFailureThreshold: Int
+    public let maxConsecutiveCIFailures: Int
     public let maxConcurrentAgents: Int
 
     public init(
@@ -46,6 +47,7 @@ public struct DaemonConfig {
         linearDoneStateId: String = "5f2c9f55-0b3d-4a86-83ff-42b84f88dbf5",
         maxAgentRetries: Int = 3,
         ciFailureThreshold: Int = 2,
+        maxConsecutiveCIFailures: Int = 10,
         maxConcurrentAgents: Int = 3
     ) {
         self.linearApiKey = linearApiKey
@@ -69,6 +71,7 @@ public struct DaemonConfig {
         self.linearDoneStateId = linearDoneStateId
         self.maxAgentRetries = maxAgentRetries
         self.ciFailureThreshold = ciFailureThreshold
+        self.maxConsecutiveCIFailures = maxConsecutiveCIFailures
         self.maxConcurrentAgents = maxConcurrentAgents
     }
 
@@ -105,6 +108,7 @@ public struct DaemonConfig {
             linearDoneStateId: environment["LINEAR_DONE_STATE_ID"] ?? "5f2c9f55-0b3d-4a86-83ff-42b84f88dbf5",
             maxAgentRetries: Int(environment["MAX_AGENT_RETRIES"] ?? "") ?? 3,
             ciFailureThreshold: Int(environment["CI_FAILURE_THRESHOLD"] ?? "") ?? 2,
+            maxConsecutiveCIFailures: Int(environment["MAX_CONSECUTIVE_CI_FAILURES"] ?? "") ?? 10,
             maxConcurrentAgents: Int(environment["MAX_CONCURRENT_AGENTS"] ?? "") ?? 3
         )
     }

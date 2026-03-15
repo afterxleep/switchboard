@@ -8,15 +8,9 @@ public final class StateStore: StateStoring {
     private let stateFileURL: URL
     private let fileManager: FileManager
     private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
 
-    public init(stateFilePath: String = "~/.flowdeck-daemon/state.json") {
-        self.stateFileURL = URL(fileURLWithPath: NSString(string: stateFilePath).expandingTildeInPath)
-        self.fileManager = .default
-        self.encoder = JSONEncoder()
-        self.decoder = JSONDecoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+    private static func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
         // Tolerate both ISO8601 strings (current format) and legacy Unix epoch doubles
         decoder.dateDecodingStrategy = .custom { decoder in
             let container = try decoder.singleValueContainer()
@@ -31,6 +25,15 @@ public final class StateStore: StateStoring {
             let epoch = try container.decode(Double.self)
             return Date(timeIntervalSince1970: epoch)
         }
+        return decoder
+    }
+
+    public init(stateFilePath: String = "~/.flowdeck-daemon/state.json") {
+        self.stateFileURL = URL(fileURLWithPath: NSString(string: stateFilePath).expandingTildeInPath)
+        self.fileManager = .default
+        self.encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
     }
 
     public var stateFilePath: String {
@@ -43,7 +46,7 @@ public final class StateStore: StateStoring {
         }
 
         let data = try Data(contentsOf: stateFileURL)
-        return try decoder.decode([String: StateEntry].self, from: data)
+        return try Self.makeDecoder().decode([String: StateEntry].self, from: data)
     }
 
     public func save(_ state: [String: StateEntry]) throws {
@@ -131,6 +134,14 @@ public final class StateStore: StateStoring {
             if let threadPath {
                 entry.threadPath = threadPath
             }
+            entry.updatedAt = Date()
+        }
+    }
+
+    public func clearPR(id: String) throws {
+        try updateEntry(id: id) { entry in
+            entry.prNumber = nil
+            entry.prTitle = nil
             entry.updatedAt = Date()
         }
     }

@@ -5,6 +5,7 @@ public enum AgentPhase: String, Codable {
     case waitingOnCI
     case waitingOnReview
     case addressingFeedback
+    case ciBlocked
     case merged
     case done
 }

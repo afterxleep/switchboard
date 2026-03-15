@@ -120,9 +120,12 @@ public final class DaemonLoop {
         cancelAllAgents()
     }
 
+    // MARK: - Reconcile (timeout recovery + thread check only)
+
     public func reconcile() async throws {
         let state = try stateStore.load()
 
+        // (a) Re-queue timed-out inFlight entries
         for entry in state.values where entry.status == .inFlight && entry.timedOut(after: config.inFlightTimeoutSeconds) {
             let task = removeRunningAgent(id: entry.id)
             task?.cancel()
@@ -131,6 +134,7 @@ public final class DaemonLoop {
             logger("re-queued timed-out agent: \(entry.id)")
         }
 
+        // (b) Check waitingOnReview entries for new unresolved threads
         for entry in state.values where entry.agentPhase == .waitingOnReview {
             guard let prNumber = entry.prNumber else {
                 continue
@@ -142,41 +146,6 @@ public final class DaemonLoop {
                 }
             }
         }
-
-        // Self-heal: coding entries with a PR already attached → phase got stuck, advance to CI monitoring
-        for entry in state.values where entry.agentPhase == .coding && entry.prNumber != nil {
-            guard runningAgent(for: entry.id) == nil else { continue }
-            try stateStore.updatePhase(id: entry.id, phase: .waitingOnCI)
-            logger("self-healed \(entry.id): coding phase with PR attached, advancing to waitingOnCI")
-        }
-
-        // Self-heal: addressingFeedback entries with no actual issues → advance to CI monitoring
-        for entry in state.values where entry.agentPhase == .addressingFeedback {
-            guard let prNumber = entry.prNumber else { continue }
-            guard runningAgent(for: entry.id) == nil else { continue }
-            let hasThreads = (try? await githubPoller.hasUnresolvedThreads(prNumber: prNumber)) ?? true
-            let hasConflicts = (try? await githubPoller.hasConflicts(prNumber: prNumber)) ?? false
-            guard hasThreads == false, hasConflicts == false else { continue }
-            try stateStore.updatePhase(id: entry.id, phase: .waitingOnCI)
-            logger("self-healed \(entry.id): no threads/conflicts, advancing to waitingOnCI")
-        }
-
-        // Self-heal: waitingOnCI entries where CI is already passing → advance to review
-        // Catches PRs where CI passed before the entry was created (missed transition event)
-        for entry in state.values where entry.agentPhase == .waitingOnCI {
-            guard let prNumber = entry.prNumber else { continue }
-            let passing = (try? await githubPoller.ciIsPassing(prNumber: prNumber)) ?? false
-            guard passing else { continue }
-            let hasThreads = (try? await githubPoller.hasUnresolvedThreads(prNumber: prNumber)) ?? false
-            let nextPhase: AgentPhase = hasThreads ? .addressingFeedback : .waitingOnReview
-            try stateStore.updatePhase(id: entry.id, phase: nextPhase)
-            if hasThreads, let linearIssueId = entry.linearIssueId {
-                try? await linearStateManager?.moveToInProgress(issueId: linearIssueId)
-            } else if let linearIssueId = entry.linearIssueId {
-                try? await linearStateManager?.moveToInReview(issueId: linearIssueId)
-            }
-            logger("self-healed \(entry.id): CI already passing, advancing to \(nextPhase)")
-        }
     }
 
     private var stopped: Bool {
@@ -185,6 +154,8 @@ public final class DaemonLoop {
         stopLock.unlock()
         return value
     }
+
+    // MARK: - Event routing (all phase transitions happen here)
 
     private func route(event: DaemonEvent) async throws {
         switch event {
@@ -201,7 +172,8 @@ public final class DaemonLoop {
             // Use PR linked directly on the Linear issue, then fall back to branch-name search
             let existingPR: (prNumber: Int, branch: String, title: String)?
             if let prNum = linkedPRNumber {
-                existingPR = (prNum, "", "")
+                let isOpen = (try? await githubPoller.isPROpen(prNumber: prNum)) ?? false
+                existingPR = isOpen ? (prNum, "", "") : nil
             } else {
                 existingPR = try? await githubPoller.findOpenPR(for: identifier)
             }
@@ -210,7 +182,7 @@ public final class DaemonLoop {
                 // If an entry already exists with this PR attached, don't overwrite its phase
                 let currentState = try stateStore.load()
                 if let current = currentState[eventId], current.prNumber != nil {
-                    return  // Already tracked — let reconcile manage phase transitions
+                    return  // Already tracked — let events manage phase transitions
                 }
                 let entry = StateEntry(
                     id: eventId,
@@ -225,7 +197,6 @@ public final class DaemonLoop {
                     agentPhase: .waitingOnCI
                 )
                 try stateStore.upsert(entry)
-                // Do NOT touch Linear state here — issue is already In Review, preserve it
                 logger("attached existing PR #\(existing.prNumber) to \(identifier)")
                 return
             }
@@ -292,14 +263,21 @@ public final class DaemonLoop {
             guard let entry = stateStore.entry(forPR: pr) else {
                 return
             }
+            try stateStore.clearPR(id: entry.id)
             try stateStore.updatePhase(id: entry.id, phase: .coding)
             try stateStore.markPending(id: entry.id)
+            startAgentIfIdle(event: fallbackEvent(for: entry, error: "PR #\(pr) was closed without merging — please reopen or create a new PR"), entry: entry)
 
         case let .ciPassed(pr, _):
             guard let entry = stateStore.entry(forPR: pr) else {
                 return
             }
             try stateStore.resetConsecutiveCIFailures(id: entry.id)
+            // If ciBlocked, unblock: reset counter and move to waitingOnCI
+            if entry.agentPhase == .ciBlocked {
+                try stateStore.updatePhase(id: entry.id, phase: .waitingOnCI)
+                logger("CI passed for ciBlocked entry \(entry.id) — unblocked, moving to waitingOnCI")
+            }
             if try await githubPoller.hasUnresolvedThreads(prNumber: pr) == false {
                 try stateStore.updatePhase(id: entry.id, phase: .waitingOnReview)
                 if let linearIssueId = entry.linearIssueId {
@@ -316,7 +294,17 @@ public final class DaemonLoop {
             guard let entry = stateStore.entry(forPR: pr) else {
                 return
             }
+            // Don't touch ciBlocked entries — they stay parked
+            guard entry.agentPhase != .ciBlocked else {
+                return
+            }
             let failureCount = try stateStore.incrementConsecutiveCIFailures(id: entry.id)
+            // Check ceiling first — if hit, park in ciBlocked permanently
+            if failureCount >= config.maxConsecutiveCIFailures {
+                try stateStore.updatePhase(id: entry.id, phase: .ciBlocked)
+                logger("CI failure ceiling reached for \(entry.id) (\(failureCount) consecutive failures) — parking in ciBlocked")
+                return
+            }
             guard failureCount >= config.ciFailureThreshold else {
                 return
             }
@@ -333,6 +321,8 @@ public final class DaemonLoop {
                 id: event.eventId, status: .done, eventType: event.eventType,
                 details: "", startedAt: nil, updatedAt: Date()
             ))
+            // Don't touch ciBlocked entries — they stay parked until CI passes
+            guard entry.agentPhase != .ciBlocked else { return }
             // Skip if agent is already actively addressing feedback for this PR
             guard entry.agentPhase != .addressingFeedback || runningAgent(for: entry.id) == nil else { return }
             try stateStore.updatePhase(id: entry.id, phase: .addressingFeedback)
@@ -343,6 +333,8 @@ public final class DaemonLoop {
 
         case let .unresolvedThread(pr, _, _, _, _, _):
             guard let entry = stateStore.entry(forPR: pr) else { return }
+            // Don't touch ciBlocked entries
+            guard entry.agentPhase != .ciBlocked else { return }
             // Use inFlight marker so a retry is possible if the agent fails without resolving the thread
             let existing = try? stateStore.load()[event.eventId]
             guard existing == nil || existing?.status == .pending else { return }
@@ -361,6 +353,8 @@ public final class DaemonLoop {
             guard let entry = stateStore.entry(forPR: pr) else {
                 return
             }
+            // Don't touch ciBlocked entries
+            guard entry.agentPhase != .ciBlocked else { return }
             try stateStore.updatePhase(id: entry.id, phase: .addressingFeedback)
             startAgentIfIdle(event: event, entry: entry)
 
@@ -390,6 +384,8 @@ public final class DaemonLoop {
         try await route(event: event)
     }
 
+    // MARK: - Event normalization
+
     private func normalize(events: [DaemonEvent]) -> [DaemonEvent] {
         var result: [DaemonEvent] = []
         var firstFeedbackEventByPR: [Int: DaemonEvent] = [:]
@@ -415,21 +411,53 @@ public final class DaemonLoop {
         return result
     }
 
+    // MARK: - Agent lifecycle
+
     private func startAgentIfIdle(event: DaemonEvent, entry: StateEntry) {
-        guard runningAgent(for: entry.id) == nil else {
+        // Always load fresh state — ignore the passed-in entry for all checks
+        guard let current = try? stateStore.load()[entry.id] else { return }
+
+        if current.retryCount >= config.maxAgentRetries {
+            logger("agent retry limit reached for \(entry.id) — skipping until manually reset")
             return
         }
-        let currentCount = agentLock.withLock { runningAgents.count }
-        guard currentCount < config.maxConcurrentAgents else {
-            logger("concurrency cap reached (\(currentCount)/\(config.maxConcurrentAgents)) — deferring agent for \(entry.id)")
+        if current.agentPhase == .ciBlocked {
+            logger("entry \(entry.id) is ciBlocked — skipping agent start")
             return
         }
-        persistPendingThreadNodeIds(for: event, entry: entry)
+        if current.consecutiveCIFailures >= config.maxConsecutiveCIFailures {
+            logger("CI ceiling active for \(entry.id) — skipping agent start")
+            return
+        }
+
+        // Atomic concurrency reservation: check count AND insert placeholder under lock
+        let reserved = agentLock.withLock { () -> Bool in
+            guard runningAgents[entry.id] == nil else { return false }
+            guard runningAgents.count < config.maxConcurrentAgents else { return false }
+            // Insert a placeholder task to atomically reserve the slot
+            runningAgents[entry.id] = Task {}
+            return true
+        }
+
+        guard reserved else {
+            let currentCount = agentLock.withLock { runningAgents.count }
+            if runningAgent(for: entry.id) != nil {
+                // Already running — silent skip
+            } else {
+                logger("concurrency cap reached (\(currentCount)/\(config.maxConcurrentAgents)) — deferring agent for \(entry.id)")
+            }
+            return
+        }
+
+        persistPendingThreadNodeIds(for: event, entry: current)
         startAgent(for: event, entryId: entry.id)
     }
 
     private func startAgent(for event: DaemonEvent, entryId: String) {
         guard let agentRunner else {
+            return
+        }
+        if (try? stateStore.load()[entryId])?.retryCount ?? 0 >= config.maxAgentRetries {
             return
         }
 
@@ -500,10 +528,8 @@ public final class DaemonLoop {
                 try stateStore.incrementRetry(id: completedId)
                 let entry = try stateStore.load()[completedId]
                 if let retryCount = entry?.retryCount, retryCount >= config.maxAgentRetries {
-                    // Reset retry counter and re-queue — never dispatch synthetic fallback events
-                    try stateStore.resetRetry(id: completedId)
                     try stateStore.markPending(id: completedId)
-                    logger("agent exhausted retries for \(completedId), resetting and re-queuing")
+                    logger("agent exhausted retries for \(completedId) — parked until manually reset")
                 } else {
                     try stateStore.markPending(id: completedId)
                 }
@@ -519,6 +545,8 @@ public final class DaemonLoop {
             }
         }
     }
+
+    // MARK: - Helpers
 
     private func fallbackEvent(for entry: StateEntry, error: String?) -> DaemonEvent {
         if let prNumber = entry.prNumber {
@@ -578,6 +606,8 @@ public final class DaemonLoop {
         logger("merge requested for PR #\(prNumber)")
     }
 
+    // MARK: - Agent tracking (thread-safe)
+
     private func cancelAllAgents() {
         let tasks = agentLock.withLock {
             let currentTasks = Array(runningAgents.values)
@@ -601,6 +631,7 @@ public final class DaemonLoop {
         }
     }
 
+    @discardableResult
     private func removeRunningAgent(id: String) -> Task<Void, Never>? {
         agentLock.withLock { runningAgents.removeValue(forKey: id) }
     }

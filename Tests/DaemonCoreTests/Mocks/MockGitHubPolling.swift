@@ -18,6 +18,8 @@ final class MockGitHubPolling: GitHubPolling {
     var receivedConflictPRNumbers: [Int] = []
     var receivedCIPassingPRNumbers: [Int] = []
     var receivedFindOpenPRIdentifiers: [String] = []
+    var stubbedIsPROpen = true
+    var receivedIsPROpenNumbers: [Int] = []
 
     func poll(state: [String: StateEntry]) async throws -> [DaemonEvent] {
         receivedStates.append(state)
@@ -53,6 +55,11 @@ final class MockGitHubPolling: GitHubPolling {
         return stubbedExistingPR
     }
 
+    func isPROpen(prNumber: Int) async throws -> Bool {
+        receivedIsPROpenNumbers.append(prNumber)
+        return stubbedIsPROpen
+    }
+
     func reset() {
         stubbedEvents = []
         stubbedErrorSequence = []
@@ -66,5 +73,7 @@ final class MockGitHubPolling: GitHubPolling {
         receivedConflictPRNumbers.removeAll()
         receivedCIPassingPRNumbers.removeAll()
         receivedFindOpenPRIdentifiers.removeAll()
+        stubbedIsPROpen = true
+        receivedIsPROpenNumbers.removeAll()
     }
 }

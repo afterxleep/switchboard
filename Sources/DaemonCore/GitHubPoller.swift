@@ -118,6 +118,11 @@ public final class GitHubPoller: GitHubPolling {
         return (pr.number, pr.head.ref, pr.title ?? "")
     }
 
+    public func isPROpen(prNumber: Int) async throws -> Bool {
+        let open = try await fetchPullRequests(state: "open")
+        return open.contains(where: { $0.number == prNumber })
+    }
+
     private func fetchPullRequests(state: String) async throws -> [GitHubPullRequest] {
         try await get(path: "/repos/\(repo)/pulls?state=\(state)")
     }
