@@ -96,7 +96,8 @@ let linearPoller = LinearPoller(
 )
 let githubPoller = GitHubPoller(
     token: config.githubToken,
-    repo: config.githubRepo
+    repo: config.githubRepo,
+    assigneeLogin: config.assigneeLogin
 )
 let dispatcher = EventDispatcher(stateStore: stateStore)
 let completionWatcher = CompletionWatcher()

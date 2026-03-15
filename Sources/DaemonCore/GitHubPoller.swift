@@ -6,9 +6,12 @@ public final class GitHubPoller: GitHubPolling {
     private let urlSession: URLSession
     private let decoder: JSONDecoder
 
-    public init(token: String, repo: String, urlSession: URLSession? = nil) {
+    private let assigneeLogin: String?
+
+    public init(token: String, repo: String, urlSession: URLSession? = nil, assigneeLogin: String? = nil) {
         self.token = token
         self.repo = repo
+        self.assigneeLogin = assigneeLogin
         if let urlSession {
             self.urlSession = urlSession
         } else {
@@ -76,15 +79,17 @@ public final class GitHubPoller: GitHubPolling {
             for comment in try await fetchIssueComments(prNumber: prNumber, lastPolledAt: lastPolled) {
                 events.append(.reviewComment(pr: prNumber, body: comment.body, author: comment.user.login))
             }
-            for thread in try await fetchUnresolvedThreads(prNumber: prNumber) {
-                events.append(.unresolvedThread(
-                    pr: prNumber,
-                    threadId: thread.id,
-                    nodeId: thread.nodeId,
-                    path: thread.path ?? "unknown",
-                    body: thread.body,
-                    author: thread.author.login
-                ))
+            if isAssignedToTrackedUser(pullRequest) {
+                for thread in try await fetchUnresolvedThreads(prNumber: prNumber) {
+                    events.append(.unresolvedThread(
+                        pr: prNumber,
+                        threadId: thread.id,
+                        nodeId: thread.nodeId,
+                        path: thread.path ?? "unknown",
+                        body: thread.body,
+                        author: thread.author.login
+                    ))
+                }
             }
         }
 
@@ -165,8 +170,6 @@ public final class GitHubPoller: GitHubPolling {
     }
 
     private func fetchUnresolvedThreads(prNumber: Int) async throws -> [GitHubReviewThread] {
-        let reviewComments: [GitHubComment] = try await get(path: "/repos/\(repo)/pulls/\(prNumber)/comments")
-        let reviewCommentNodeIds = Dictionary(uniqueKeysWithValues: reviewComments.map { ($0.id, $0.nodeId) })
         let payload: GitHubGraphQLResponse<GitHubPullRequestThreadsData> = try await postGraphQL(query: """
         query PullRequestThreads($owner: String!, $repo: String!, $number: Int!) {
           repository(owner: $owner, name: $repo) {
@@ -196,13 +199,11 @@ public final class GitHubPoller: GitHubPolling {
         return threads.compactMap { thread in
             guard
                 thread.isResolved == false,
-                let comment = thread.comments.nodes.last,
-                let commentId = comment.databaseId,
-                let nodeId = reviewCommentNodeIds[commentId]
+                let comment = thread.comments.nodes.last
             else {
                 return nil
             }
-            return GitHubReviewThread(id: String(commentId), nodeId: nodeId, path: thread.path, body: comment.body, author: comment.author)
+            return GitHubReviewThread(id: thread.id, nodeId: thread.id, path: thread.path, body: comment.body, author: comment.author)
         }
     }
 
@@ -245,6 +246,11 @@ public final class GitHubPoller: GitHubPolling {
         }
 
         return result
+    }
+
+    private func isAssignedToTrackedUser(_ pr: GitHubPullRequest) -> Bool {
+        guard let login = assigneeLogin else { return true }
+        return pr.assignees.contains { $0.login.lowercased() == login.lowercased() }
     }
 
     private func shouldTrack(branch: String) -> Bool {
@@ -361,11 +367,23 @@ private struct GitHubPullRequest: Decodable {
     let mergedAt: Date?
     let head: GitHubPullRequestHead
     let mergeableState: String?
+    let assignees: [GitHubUser]
 
     private enum CodingKeys: String, CodingKey {
-        case number, title, state, head
+        case number, title, state, head, assignees
         case mergedAt = "merged_at"
         case mergeableState = "mergeable_state"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        number = try container.decode(Int.self, forKey: .number)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        state = try container.decode(String.self, forKey: .state)
+        mergedAt = try container.decodeIfPresent(Date.self, forKey: .mergedAt)
+        head = try container.decode(GitHubPullRequestHead.self, forKey: .head)
+        mergeableState = try container.decodeIfPresent(String.self, forKey: .mergeableState)
+        assignees = (try? container.decodeIfPresent([GitHubUser].self, forKey: .assignees)) ?? []
     }
 }
 
