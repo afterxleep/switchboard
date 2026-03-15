@@ -143,6 +143,13 @@ public final class DaemonLoop {
             }
         }
 
+        // Self-heal: coding entries with a PR already attached → phase got stuck, advance to CI monitoring
+        for entry in state.values where entry.agentPhase == .coding && entry.prNumber != nil {
+            guard runningAgent(for: entry.id) == nil else { continue }
+            try stateStore.updatePhase(id: entry.id, phase: .waitingOnCI)
+            logger("self-healed \(entry.id): coding phase with PR attached, advancing to waitingOnCI")
+        }
+
         // Self-heal: addressingFeedback entries with no actual issues → advance to CI monitoring
         for entry in state.values where entry.agentPhase == .addressingFeedback {
             guard let prNumber = entry.prNumber else { continue }

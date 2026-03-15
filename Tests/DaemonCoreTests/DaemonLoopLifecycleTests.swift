@@ -1086,4 +1086,28 @@ extension DaemonLoopLifecycleTests {
         XCTAssertEqual(marker?.status, .pending, "thread marker must be reset to pending on agent failure")
     }
 
+    func test_reconcile_whenCodingPhaseHasPRAttached_advancesToWaitingOnCI() async throws {
+        // Arrange — coding entry with PR already attached (phase got stuck)
+        let store = makeStore()
+        try store.upsert(StateEntry(
+            id: "linear:DB-700",
+            status: .pending,
+            eventType: "new_issue",
+            details: "DB-700",
+            startedAt: nil,
+            updatedAt: Date(),
+            prNumber: 700,
+            linearIssueId: "issue-700",
+            agentPhase: .coding
+        ))
+        let loop = makeLoop(stateStore: store, githubPoller: MockGitHubPolling(), agentRunner: MockAgentRunner(), linearManager: MockLinearStateManager())
+
+        // Act
+        try await loop.reconcile()
+
+        // Assert
+        let entry = try XCTUnwrap(try store.load()["linear:DB-700"])
+        XCTAssertEqual(entry.agentPhase, AgentPhase.waitingOnCI, "coding entry with PR attached must advance to waitingOnCI")
+    }
+
 }
