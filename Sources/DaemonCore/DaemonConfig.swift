@@ -1,5 +1,10 @@
 import Foundation
 
+public enum AgentBackend: String {
+    case codex
+    case claude
+}
+
 public struct DaemonConfig {
     public let linearApiKey: String
     public let linearTeamSlug: String
@@ -11,6 +16,8 @@ public struct DaemonConfig {
     public let inFlightTimeoutSeconds: TimeInterval
     public let stateFilePath: String
     public let codexCommand: String
+    public let claudeCommand: String
+    public let agentBackend: AgentBackend
     public let workspaceRoot: String
     public let repoPath: String
     public let workflowTemplatePath: String
@@ -38,6 +45,8 @@ public struct DaemonConfig {
         inFlightTimeoutSeconds: TimeInterval,
         stateFilePath: String,
         codexCommand: String,
+        claudeCommand: String = "/opt/homebrew/bin/claude",
+        agentBackend: AgentBackend = .claude,
         workspaceRoot: String,
         repoPath: String,
         workflowTemplatePath: String,
@@ -64,6 +73,8 @@ public struct DaemonConfig {
         self.inFlightTimeoutSeconds = inFlightTimeoutSeconds
         self.stateFilePath = stateFilePath
         self.codexCommand = codexCommand
+        self.claudeCommand = claudeCommand
+        self.agentBackend = agentBackend
         self.workspaceRoot = workspaceRoot
         self.repoPath = repoPath
         self.workflowTemplatePath = workflowTemplatePath
@@ -103,6 +114,8 @@ public struct DaemonConfig {
             inFlightTimeoutSeconds: TimeInterval(environment["INFLIGHT_TIMEOUT_SECONDS"] ?? "") ?? 1800,
             stateFilePath: "~/.flowdeck-daemon/state.json",
             codexCommand: environment["CODEX_COMMAND"] ?? "/opt/homebrew/bin/codex",
+            claudeCommand: environment["CLAUDE_COMMAND"] ?? "/opt/homebrew/bin/claude",
+            agentBackend: AgentBackend(rawValue: environment["AGENT_BACKEND"] ?? "claude") ?? .claude,
             workspaceRoot: environment["WORKSPACE_ROOT"] ?? "~/.flowdeck-daemon/workspaces",
             repoPath: environment["REPO_PATH"] ?? "~/Developer/flowdeck",
             workflowTemplatePath: environment["WORKFLOW_TEMPLATE_PATH"] ?? "~/.flowdeck-daemon/WORKFLOW.md",

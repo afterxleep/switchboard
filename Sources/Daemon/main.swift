@@ -38,6 +38,8 @@ private func makeConfig() -> DaemonConfig {
                 inFlightTimeoutSeconds: config.inFlightTimeoutSeconds,
                 stateFilePath: config.stateFilePath,
                 codexCommand: config.codexCommand,
+                claudeCommand: config.claudeCommand,
+                agentBackend: config.agentBackend,
                 workspaceRoot: config.workspaceRoot,
                 repoPath: config.repoPath,
                 workflowTemplatePath: config.workflowTemplatePath,
@@ -211,7 +213,9 @@ if
         ciTemplate: ciTemplate,
         conflictTemplate: conflictTemplate,
         workspaceManager: WorkspaceManager(rootPath: config.workspaceRoot),
-        codexClient: CodexAppServerClient(codexPath: config.codexCommand),
+        codexClient: config.agentBackend == .claude
+            ? ClaudeCodeClient(claudePath: config.claudeCommand)
+            : CodexAppServerClient(codexPath: config.codexCommand),
         stateStore: stateStore,
         logger: { message in
             logJSON(level: "info", message: message, metadata: [:])
