@@ -130,8 +130,10 @@ REPO_PATH=~/Developer/your-repo
 # Optional tuning
 POLL_INTERVAL_SECONDS=60
 INFLIGHT_TIMEOUT_SECONDS=1800                  # Re-queue stuck agents after 30 min
-MAX_AGENT_RETRIES=3
-CI_FAILURE_THRESHOLD=2
+STALL_TIMEOUT_SECONDS=1800                     # Kill a Codex session with no output after this long
+MAX_AGENT_RETRIES=3                            # Park an issue after this many consecutive failures
+MAX_CONCURRENT_AGENTS=6                        # Max parallel Codex sessions
+CI_FAILURE_THRESHOLD=2                         # Trigger CI fix after this many failures
 CODEX_COMMAND=/opt/homebrew/bin/codex          # Path to codex CLI
 WORKSPACE_ROOT=~/.switchboard/workspaces       # Where worktrees are created
 ```
@@ -202,6 +204,20 @@ Rebase onto main, resolve conflicts, run tests, force-push.
 ```bash
 switchboard
 ```
+
+### Check status
+```bash
+switchboard status
+```
+Shows active and parked issues at a glance.
+
+### Reset a parked issue
+```bash
+switchboard reset DB-165
+switchboard reset DB-165 DB-196 DB-197   # multiple at once
+```
+Resets the retry count so the daemon picks it up on the next tick. Use this after fixing the underlying problem (e.g. topping up API credit, fixing a broken prompt).
+
 
 ### As a background service (launchd on macOS)
 
@@ -294,12 +310,12 @@ PR merged
 
 ### State persistence
 
-State is stored at `~/.switchboard/state.json`. Each issue entry tracks:
+State is stored in SQLite at `~/.switchboard/state.db`. Each issue entry tracks:
 - Linear issue ID and identifier
 - Codex thread ID and session path (for resumption)
 - PR number
 - Current lifecycle phase
-- Retry count
+- Retry count and consecutive CI failure count
 
 ### Concurrency
 
@@ -339,27 +355,24 @@ switchboard/
 
 ---
 
-## State file
+## State database
 
-`~/.switchboard/state.json` — inspectable at any time:
+State is stored in SQLite at `~/.switchboard/state.db`. Use `switchboard status` for a human-readable view. For raw inspection:
 
-```json
-{
-  "linear:DB-196": {
-    "id": "linear:DB-196",
-    "status": "inFlight",
-    "agentPhase": "waitingOnReview",
-    "prNumber": 137,
-    "sessionId": "019cec5b-...",
-    "linearIssueId": "uuid-...",
-    "eventType": "new_issue",
-    "details": "DB-196: Add Symphony-style agent runner",
-    "retryCount": 0,
-    "startedAt": "2026-03-14T13:51:00Z",
-    "updatedAt": "2026-03-14T14:20:00Z"
-  }
-}
+```bash
+sqlite3 ~/.switchboard/state.db \
+  "SELECT id, status, agent_phase, retry_count, consecutive_ci_failures FROM state_entries;"
 ```
+
+Key columns:
+
+| Column | Description |
+|--------|-------------|
+| `id` | Entry key, e.g. `linear:DB-196` or `gh:pr:122` |
+| `status` | `pending` / `inFlight` / `done` |
+| `agent_phase` | `coding` / `waitingOnCI` / `addressingFeedback` / `waitingOnReview` / `ciBlocked` / `done` |
+| `retry_count` | Consecutive agent failures. Parked when ≥ `MAX_AGENT_RETRIES` (default 3) |
+| `consecutive_ci_failures` | Parked in `ciBlocked` when ≥ `MAX_CONSECUTIVE_CI_FAILURES` (default 10) |
 
 ---
 
