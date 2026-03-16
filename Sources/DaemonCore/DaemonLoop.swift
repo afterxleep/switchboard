@@ -178,6 +178,7 @@ public final class DaemonLoop {
                 if let current = currentState[eventId], current.prNumber != nil {
                     return  // Already tracked — let events manage phase transitions
                 }
+                let existingRetryCount = currentState[eventId]?.retryCount ?? 0
                 let entry = StateEntry(
                     id: eventId,
                     status: .inFlight,
@@ -188,10 +189,19 @@ public final class DaemonLoop {
                     prNumber: existing.prNumber,
                     prTitle: existing.title,
                     linearIssueId: id,
-                    agentPhase: .waitingOnCI
+                    agentPhase: .waitingOnCI,
+                    retryCount: existingRetryCount
                 )
                 try stateStore.upsert(entry)
                 logger("attached existing PR #\(existing.prNumber) to \(identifier)")
+                return
+            }
+
+            // Preserve retry count from existing entry — never overwrite with 0
+            let existingEntry = try? stateStore.load()[eventId]
+            let preservedRetryCount = existingEntry?.retryCount ?? 0
+            if preservedRetryCount >= config.maxAgentRetries {
+                logger("newIssue \(identifier): retry limit reached (\(preservedRetryCount)) — skipping")
                 return
             }
 
@@ -203,7 +213,8 @@ public final class DaemonLoop {
                 startedAt: nil,
                 updatedAt: Date(),
                 linearIssueId: id,
-                agentPhase: .coding
+                agentPhase: existingEntry?.agentPhase ?? .coding,
+                retryCount: preservedRetryCount
             )
             try stateStore.upsert(entry)
             try stateStore.markTurnStarted(id: eventId)

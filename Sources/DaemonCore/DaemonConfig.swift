@@ -24,6 +24,7 @@ public struct DaemonConfig {
     public let ciFailureThreshold: Int
     public let maxConsecutiveCIFailures: Int
     public let maxConcurrentAgents: Int
+    public let stallTimeoutSeconds: TimeInterval
     public var assigneeLogin: String?
 
     public init(
@@ -49,7 +50,8 @@ public struct DaemonConfig {
         maxAgentRetries: Int = 3,
         ciFailureThreshold: Int = 2,
         maxConsecutiveCIFailures: Int = 10,
-        maxConcurrentAgents: Int = 3,
+        maxConcurrentAgents: Int = 6,
+        stallTimeoutSeconds: TimeInterval = 1800,
         assigneeLogin: String? = nil
     ) {
         self.linearApiKey = linearApiKey
@@ -75,6 +77,7 @@ public struct DaemonConfig {
         self.ciFailureThreshold = ciFailureThreshold
         self.maxConsecutiveCIFailures = maxConsecutiveCIFailures
         self.maxConcurrentAgents = maxConcurrentAgents
+        self.stallTimeoutSeconds = stallTimeoutSeconds
         self.assigneeLogin = assigneeLogin
     }
 
@@ -112,7 +115,8 @@ public struct DaemonConfig {
             maxAgentRetries: Int(environment["MAX_AGENT_RETRIES"] ?? "") ?? 3,
             ciFailureThreshold: Int(environment["CI_FAILURE_THRESHOLD"] ?? "") ?? 2,
             maxConsecutiveCIFailures: Int(environment["MAX_CONSECUTIVE_CI_FAILURES"] ?? "") ?? 10,
-            maxConcurrentAgents: Int(environment["MAX_CONCURRENT_AGENTS"] ?? "") ?? 3,
+            maxConcurrentAgents: Int(environment["MAX_CONCURRENT_AGENTS"] ?? "") ?? 6,
+            stallTimeoutSeconds: TimeInterval(environment["STALL_TIMEOUT_SECONDS"] ?? "") ?? 1800,
             assigneeLogin: environment["FLOWDECK_ASSIGNEE_LOGIN"].flatMap { $0.isEmpty ? nil : $0 }
         )
     }
