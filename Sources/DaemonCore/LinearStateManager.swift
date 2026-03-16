@@ -4,6 +4,7 @@ public protocol LinearStateManaging {
     func moveToInProgress(issueId: String) async throws
     func moveToInReview(issueId: String) async throws
     func moveToDone(issueId: String) async throws
+    func postComment(issueId: String, body: String) async throws
 }
 
 public final class LinearStateManager: LinearStateManaging {
@@ -44,6 +45,27 @@ public final class LinearStateManager: LinearStateManaging {
 
     public func moveToDone(issueId: String) async throws {
         try await update(issueId: issueId, stateId: doneStateId)
+    }
+
+    public func postComment(issueId: String, body: String) async throws {
+        var request = URLRequest(url: URL(string: "https://api.linear.app/graphql")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "query": """
+            mutation CreateComment($issueId: String!, $body: String!) {
+              commentCreate(input: { issueId: $issueId, body: $body }) {
+                success
+              }
+            }
+            """,
+            "variables": ["issueId": issueId, "body": body],
+        ])
+        let (_, response) = try await urlSession.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200 ..< 300).contains(http.statusCode) {
+            throw LinearStateManagerError.httpError(issueId: issueId, stateId: "comment", statusCode: http.statusCode)
+        }
     }
 
     private func update(issueId: String, stateId: String) async throws {

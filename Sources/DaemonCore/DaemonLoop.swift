@@ -535,6 +535,13 @@ public final class DaemonLoop {
                 if let retryCount = entry?.retryCount, retryCount >= config.maxAgentRetries {
                     try stateStore.markPending(id: completedId)
                     logger("agent exhausted retries for \(completedId) — parked until manually reset")
+                    if let linearIssueId = entry?.linearIssueId {
+                        let errorDetail = result.error ?? "unknown error"
+                        try? await linearStateManager?.postComment(
+                            issueId: linearIssueId,
+                            body: "⚠️ **Agent parked after \(retryCount) failed attempts.**\n\nLast error: `\(errorDetail)`\n\nCodex was stopped to prevent runaway API usage. To retry this issue, ask James to reset it."
+                        )
+                    }
                 } else {
                     try stateStore.markPending(id: completedId)
                 }

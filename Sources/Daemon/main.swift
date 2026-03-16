@@ -87,6 +87,64 @@ private func installSignalHandlers(loop: DaemonLoop) {
     }
 }
 
+// MARK: - Subcommands
+
+let args = CommandLine.arguments.dropFirst()
+
+if args.first == "reset" {
+    // Usage: flowdeck-daemon reset <id> [<id2> ...]
+    // e.g.: flowdeck-daemon reset linear:DB-165 linear:DB-196
+    //       flowdeck-daemon reset DB-165            (linear: prefix auto-added)
+    let ids = Array(args.dropFirst()).map { id -> String in
+        if id.hasPrefix("linear:") || id.hasPrefix("gh:") { return id }
+        return "linear:\(id)"
+    }
+    guard !ids.isEmpty else {
+        fputs("Usage: flowdeck-daemon reset <id> [<id2> ...]\n", stderr)
+        fputs("Example: flowdeck-daemon reset DB-165 DB-196 linear:DB-197\n", stderr)
+        exit(1)
+    }
+    let dbPath = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".flowdeck-daemon/state.db").path
+    guard let store = try? SQLiteStateStore(dbPath: dbPath) else {
+        fputs("Failed to open state database at \(dbPath)\n", stderr)
+        exit(1)
+    }
+    for id in ids {
+        do {
+            try store.resetRetry(id: id)
+            try store.markPending(id: id)
+            print("✓ reset \(id)")
+        } catch {
+            fputs("✗ \(id): \(error.localizedDescription)\n", stderr)
+        }
+    }
+    exit(EXIT_SUCCESS)
+}
+
+if args.first == "status" {
+    let dbPath = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".flowdeck-daemon/state.db").path
+    guard let store = try? SQLiteStateStore(dbPath: dbPath) else {
+        fputs("Failed to open state database\n", stderr)
+        exit(1)
+    }
+    let state = (try? store.load()) ?? [:]
+    let active = state.values.filter { $0.status == .inFlight || ($0.status == .pending && $0.agentPhase != .done && $0.agentPhase != .waitingOnReview) }
+    let parked = state.values.filter { $0.retryCount >= 3 }
+    print("Active (\(active.count)):")
+    for e in active.sorted(by: { $0.id < $1.id }) {
+        print("  \(e.id)  phase=\(e.agentPhase)  retries=\(e.retryCount)  ciFails=\(e.consecutiveCIFailures)")
+    }
+    if !parked.isEmpty {
+        print("\nParked (\(parked.count)) — run 'flowdeck-daemon reset <id>' to resume:")
+        for e in parked.sorted(by: { $0.id < $1.id }) {
+            print("  \(e.id)  retries=\(e.retryCount)")
+        }
+    }
+    exit(EXIT_SUCCESS)
+}
+
 let config = makeConfig()
 let stateDatabasePath = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent(".flowdeck-daemon", isDirectory: true)
