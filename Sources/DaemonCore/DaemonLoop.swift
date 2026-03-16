@@ -511,6 +511,11 @@ public final class DaemonLoop {
                     entry.pendingThreadNodeIds.removeAll()
                     try stateStore.upsert(entry)
 
+                    // James posts proof-of-work comment on the PR (not Kai)
+                    if let prNumber = entry.prNumber {
+                        try? await postProofOfWork(prNumber: prNumber, entry: entry)
+                    }
+
                     if entry.agentPhase == .addressingFeedback, let prNumber = entry.prNumber {
                         if
                             try await githubPoller.ciIsPassing(prNumber: prNumber),
@@ -596,6 +601,23 @@ public final class DaemonLoop {
         }
         let state = try? stateStore.load()
         return state?["linear:\(identifier)"]
+    }
+
+    private func postProofOfWork(prNumber: Int, entry: StateEntry) async throws {
+        guard let prMerger else { return }
+        let phase = entry.agentPhase
+        let identifier = entry.messageIdentifier
+        let body: String
+        switch phase {
+        case .coding:
+            body = "✅ **\(identifier):** Kai completed the initial implementation. Branch pushed — CI running."
+        case .addressingFeedback:
+            body = "✅ **\(identifier):** Review feedback addressed. Changes pushed — CI re-running."
+        default:
+            return // no comment needed for other phases
+        }
+        try await prMerger.postComment(pr: prNumber, body: body)
+        logger("posted proof-of-work comment on PR #\(prNumber)")
     }
 
     private func attemptMergeIfReady(prNumber: Int, stateId: String) async throws {

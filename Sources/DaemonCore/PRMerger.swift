@@ -39,6 +39,14 @@ public final class PRMerger: PRMerging {
         _ = try await response(for: request, path: path)
     }
 
+    public func postComment(pr: Int, body: String) async throws {
+        // Use issue comments endpoint (works for PR comments without requiring a diff position)
+        let issuePath = "/repos/\(repo)/issues/\(pr)/comments"
+        var request = makeRequest(path: issuePath, method: "POST")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["body": body])
+        _ = try await response(for: request, path: issuePath)
+    }
+
     public func isMergeable(pr: Int) async throws -> PRMergeability {
         let pullRequest: PullRequest = try await get(path: try pullRequestPath(pr: pr))
         let reviews: [Review] = try await get(path: try pullRequestPath(pr: pr) + "/reviews")
