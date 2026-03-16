@@ -32,6 +32,11 @@ final class MockPRMerger: PRMerging {
         return stubbedMergeability
     }
 
+    var postedPRComments: [(pr: Int, body: String)] = []
+    func postComment(pr: Int, body: String) async throws {
+        postedPRComments.append((pr: pr, body: body))
+    }
+
     func reset() {
         stubbedMergeability = PRMergeability(
             approved: false,

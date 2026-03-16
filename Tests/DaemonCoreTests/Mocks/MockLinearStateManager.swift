@@ -19,6 +19,11 @@ final class MockLinearStateManager: LinearStateManaging {
         doneIssueIds.append(issueId)
     }
 
+    var postedComments: [(issueId: String, body: String)] = []
+    func postComment(issueId: String, body: String) async throws {
+        postedComments.append((issueId: issueId, body: body))
+    }
+
     func reset() {
         inProgressIssueIds.removeAll()
         inReviewIssueIds.removeAll()
