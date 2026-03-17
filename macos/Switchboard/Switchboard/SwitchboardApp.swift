@@ -10,8 +10,7 @@ struct SwitchboardApp: App {
                 .environmentObject(stateModel)
         } label: {
             Image(systemName: "cpu")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(stateModel.daemonStatusColor)
+                .foregroundStyle(stateModel.daemonStatus == .running ? Color.green : Color.red)
         }
         .menuBarExtraStyle(.window)
 

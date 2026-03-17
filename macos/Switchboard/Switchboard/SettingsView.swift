@@ -6,7 +6,6 @@ struct SettingsView: View {
     @State private var linearAPIKey = ""
     @State private var linearTeamSlug = ""
     @State private var repoPath = ""
-    @State private var codexCommand = ""
     @State private var saveStatus = ""
 
     private let configURL: URL = {
@@ -28,14 +27,11 @@ struct SettingsView: View {
 
             Section("Paths") {
                 TextField("Repo Path", text: $repoPath, prompt: Text("~/Developer/myrepo"))
-                TextField("Codex Path", text: $codexCommand, prompt: Text("/opt/homebrew/bin/codex"))
             }
 
             HStack {
-                Button("Save") {
-                    save()
-                }
-                .keyboardShortcut(.defaultAction)
+                Button("Save") { save() }
+                    .keyboardShortcut(.defaultAction)
 
                 if !saveStatus.isEmpty {
                     Text(saveStatus)
@@ -45,7 +41,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 380)
+        .frame(width: 480, height: 340)
         .onAppear { load() }
     }
 
@@ -59,7 +55,6 @@ struct SettingsView: View {
         linearAPIKey = dict["LINEAR_API_KEY"] ?? ""
         linearTeamSlug = dict["LINEAR_TEAM_SLUG"] ?? ""
         repoPath = dict["REPO_PATH"] ?? ""
-        codexCommand = dict["CODEX_COMMAND"] ?? ""
     }
 
     private func save() {
@@ -68,8 +63,7 @@ struct SettingsView: View {
             "GITHUB_REPO": githubRepo,
             "LINEAR_API_KEY": linearAPIKey,
             "LINEAR_TEAM_SLUG": linearTeamSlug,
-            "REPO_PATH": repoPath,
-            "CODEX_COMMAND": codexCommand
+            "REPO_PATH": repoPath
         ]
 
         do {
@@ -82,10 +76,7 @@ struct SettingsView: View {
             return
         }
 
-        // Update launchd plist environment variables
         updatePlistEnvVars(config)
-
-        // Restart daemon
         restartDaemon()
 
         saveStatus = "Saved & daemon restarted"
@@ -97,7 +88,6 @@ struct SettingsView: View {
     private func updatePlistEnvVars(_ config: [String: String]) {
         let plistPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/com.flowdeck.daemon.plist").path
-
         guard FileManager.default.fileExists(atPath: plistPath) else { return }
 
         for (key, value) in config {
@@ -109,7 +99,6 @@ struct SettingsView: View {
             try? process.run()
             process.waitUntilExit()
 
-            // If the key doesn't exist, add it
             if process.terminationStatus != 0 {
                 let addProcess = Process()
                 addProcess.executableURL = URL(fileURLWithPath: "/usr/libexec/PlistBuddy")
