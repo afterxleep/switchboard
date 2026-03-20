@@ -8,10 +8,27 @@ public final class ClaudeCodeClient: CodexAppServerRunning {
     public private(set) var lastProcessIdentifier: Int?
     public private(set) var lastTokensUsed: Int
     public private(set) var lastError: String?
+    private var resultReceived: Bool = false
 
-    public init(claudePath: String = "/opt/homebrew/bin/claude") {
-        self.claudePath = claudePath
+    public init(claudePath: String? = nil) {
+        self.claudePath = claudePath ?? Self.resolveClaudePath() ?? "/opt/homebrew/bin/claude"
         self.lastTokensUsed = 0
+    }
+
+    private static func resolveClaudePath() -> String? {
+        let searchDirectories = [
+            NSString(string: "~/.local/bin").expandingTildeInPath,
+            NSString(string: "~/bin").expandingTildeInPath,
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+        ]
+        for directory in searchDirectories {
+            let candidate = URL(fileURLWithPath: directory).appendingPathComponent("claude").path
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
     }
 
     public func run(
@@ -25,9 +42,9 @@ public final class ClaudeCodeClient: CodexAppServerRunning {
         resetRunState()
         let arguments = [
             "--print",
+            "--verbose",
             "--permission-mode", "bypassPermissions",
             "--output-format", "stream-json",
-            "--no-session-persistence=false",
             prompt,
         ]
         return await execute(
@@ -53,6 +70,7 @@ public final class ClaudeCodeClient: CodexAppServerRunning {
         let arguments = [
             "--resume", threadId,
             "--print",
+            "--verbose",
             "--permission-mode", "bypassPermissions",
             "--output-format", "stream-json",
             prompt,
@@ -72,6 +90,7 @@ public final class ClaudeCodeClient: CodexAppServerRunning {
         lastProcessIdentifier = nil
         lastTokensUsed = 0
         lastError = nil
+        resultReceived = false
     }
 
     private func execute(
@@ -182,13 +201,14 @@ public final class ClaudeCodeClient: CodexAppServerRunning {
         process.waitUntilExit()
         let exitCode = process.terminationStatus
 
-        if exitCode != 0 && lastError == nil {
+        if exitCode != 0 && lastError == nil && !resultReceived {
             lastError = "claude exited with code \(exitCode)"
         }
 
         computeThreadPath(workspace: workspace)
 
-        return exitCode == 0 && lastError == nil
+        // Treat as success if we got a successful result event, even if exit code is non-zero
+        return lastError == nil || resultReceived
     }
 
     private func processEvent(jsonLine: String, sessionIdExtracted: inout Bool, onEvent: @escaping (String) -> Void) {
@@ -221,6 +241,8 @@ public final class ClaudeCodeClient: CodexAppServerRunning {
                 lastError = errorMsg
             } else if subtype == "error_max_turns" {
                 lastError = "error_max_turns"
+            } else if subtype == "success" {
+                resultReceived = true
             }
         }
 

@@ -544,7 +544,7 @@ public final class DaemonLoop {
                         let errorDetail = result.error ?? "unknown error"
                         try? await linearStateManager?.postComment(
                             issueId: linearIssueId,
-                            body: "⚠️ **Agent parked after \(retryCount) failed attempts.**\n\nLast error: `\(errorDetail)`\n\nCodex was stopped to prevent runaway API usage. To retry this issue, ask James to reset it."
+                            body: "⚠️ **Agent parked after \(retryCount) failed attempts.**\n\nLast error: `\(errorDetail)`\n\nAgent was stopped to prevent runaway API usage. It will automatically retry with backoff."
                         )
                     }
                 } else {

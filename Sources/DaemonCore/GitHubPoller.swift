@@ -31,9 +31,18 @@ public final class GitHubPoller: GitHubPolling {
         var events: [DaemonEvent] = []
         let trackedPRNumbers = Set(state.values.compactMap(\.prNumber))
 
-        for pullRequest in openPullRequests where shouldTrack(branch: pullRequest.head.ref) {
+        for pullRequest in openPullRequests where shouldTrack(branch: pullRequest.head.ref) && isAssignedToTrackedUser(pullRequest) {
             if trackedPRNumbers.contains(pullRequest.number) == false {
                 events.append(.prOpened(pr: pullRequest.number, branch: pullRequest.head.ref, title: pullRequest.title ?? ""))
+            }
+        }
+
+        // Drop entries from state for PRs no longer assigned to the tracked user
+        for entry in state.values {
+            guard let prNumber = entry.prNumber, entry.status != .done else { continue }
+            if let pr = openPullRequests.first(where: { $0.number == prNumber }),
+               !isAssignedToTrackedUser(pr) {
+                events.append(.prClosed(pr: prNumber, branch: pr.head.ref))
             }
         }
 

@@ -33,7 +33,7 @@ public final class LinearPoller: LinearPolling {
 
     public func poll(state: [String: StateEntry]) async throws -> [DaemonEvent] {
         let issues = try await fetchIssues()
-        return issues.compactMap { issue in
+        var events: [DaemonEvent] = issues.compactMap { issue in
             let stateName = Self.normalizeStateName(issue.state.name)
             let eventId = "linear:\(issue.identifier)"
 
@@ -58,6 +58,20 @@ public final class LinearPoller: LinearPolling {
 
             return nil
         }
+
+        // Drop state entries for issues no longer assigned to us (unassigned or deleted)
+        if assigneeId.isEmpty == false {
+            let fetchedIdentifiers = Set(issues.map { $0.identifier })
+            for (eventId, entry) in state {
+                guard eventId.hasPrefix("linear:"), entry.status != .done else { continue }
+                let identifier = String(eventId.dropFirst("linear:".count))
+                if !fetchedIdentifiers.contains(identifier) {
+                    events.append(.issueCancelled(id: entry.linearIssueId ?? identifier, identifier: identifier))
+                }
+            }
+        }
+
+        return events
     }
 
     private func fetchIssues() async throws -> [LinearIssue] {

@@ -16,7 +16,7 @@ public struct DaemonConfig {
     public let inFlightTimeoutSeconds: TimeInterval
     public let stateFilePath: String
     public let codexCommand: String
-    public let claudeCommand: String
+    public let claudeCommand: String?
     public let agentBackend: AgentBackend
     public let workspaceRoot: String
     public let repoPath: String
@@ -45,7 +45,7 @@ public struct DaemonConfig {
         inFlightTimeoutSeconds: TimeInterval,
         stateFilePath: String,
         codexCommand: String,
-        claudeCommand: String = "/opt/homebrew/bin/claude",
+        claudeCommand: String? = nil,
         agentBackend: AgentBackend = .claude,
         workspaceRoot: String,
         repoPath: String,
@@ -114,7 +114,7 @@ public struct DaemonConfig {
             inFlightTimeoutSeconds: TimeInterval(environment["INFLIGHT_TIMEOUT_SECONDS"] ?? "") ?? 1800,
             stateFilePath: "~/.flowdeck-daemon/state.json",
             codexCommand: environment["CODEX_COMMAND"] ?? "/opt/homebrew/bin/codex",
-            claudeCommand: environment["CLAUDE_COMMAND"] ?? "/opt/homebrew/bin/claude",
+            claudeCommand: environment["CLAUDE_COMMAND"],
             agentBackend: AgentBackend(rawValue: environment["AGENT_BACKEND"] ?? "claude") ?? .claude,
             workspaceRoot: environment["WORKSPACE_ROOT"] ?? "~/.flowdeck-daemon/workspaces",
             repoPath: environment["REPO_PATH"] ?? "~/Developer/flowdeck",

@@ -10,7 +10,7 @@ let package = Package(
             path: "Sources/DaemonCore"
         ),
         .executableTarget(
-            name: "daemon",
+            name: "switchboard",
             dependencies: ["DaemonCore"],
             path: "Sources/Daemon"
         ),
